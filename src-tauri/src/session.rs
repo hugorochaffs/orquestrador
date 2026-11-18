@@ -79,7 +79,7 @@ fn exclude_orchestra(dir: &Path) {
 }
 
 /// Spawna o claude interativo (task_id "main"), chama `crate::subagents::spawn_watcher` e devolve o pty_id.
-pub fn start(app: &AppHandle, session: &SessionConfig, pty: &Arc<PtyManager>) -> Result<String, String> {
+pub fn start(app: &AppHandle, session: &SessionConfig, model: Option<&str>, pty: &Arc<PtyManager>) -> Result<String, String> {
     let odir = session.dir.join(".orchestra");
     std::fs::create_dir_all(&odir).map_err(|e| format!("falha ao criar .orchestra: {e}"))?;
     let events = odir.join("events.jsonl");
@@ -89,7 +89,7 @@ pub fn start(app: &AppHandle, session: &SessionConfig, pty: &Arc<PtyManager>) ->
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let usage = odir.join("usage.json");
     let settings = hook_settings(&exe, &events, &usage);
-    let argv = crate::tools::claude_argv(session.model.as_deref(), &settings);
+    let argv = crate::tools::claude_argv(model, &settings);
 
     crate::subagents::spawn_watcher(app.clone(), events);
     crate::usage::spawn_watcher(app.clone(), usage);

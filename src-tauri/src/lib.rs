@@ -11,7 +11,7 @@ pub mod usage;
 use std::sync::Arc;
 use types::SessionConfig;
 
-/// Sobe a GUI Tauri depois que o wizard montou a sessão.
+/// Sobe a GUI Tauri com a sessão já montada pelo CLI.
 pub fn run(session: SessionConfig) {
     tauri::Builder::default()
         .manage(session)
@@ -19,6 +19,7 @@ pub fn run(session: SessionConfig) {
         .invoke_handler(tauri::generate_handler![
             ipc::get_session,
             ipc::start_main,
+            ipc::list_models,
             ipc::write_pty,
             ipc::resize_pty
         ])
