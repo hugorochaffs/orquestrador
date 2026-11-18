@@ -103,10 +103,9 @@ pub fn abort_merge(integration: &Path) -> Result<(), String> {
     git(integration, &["merge", "--abort"]).map(|_| ())
 }
 
-/// Marcadores de conflito (ou entradas não resolvidas) no worktree.
+/// Marcadores de conflito no worktree.
 pub fn has_conflict_markers(wt: &Path) -> bool {
     git_raw(wt, &["grep", "-q", "-E", "^(<<<<<<< |>>>>>>> |=======$)"]).map(|o| o.status.success()).unwrap_or(false)
-        || !git(wt, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default().is_empty()
 }
 
 /// Fast-forward da branch original para a integração, só se não divergiu.
