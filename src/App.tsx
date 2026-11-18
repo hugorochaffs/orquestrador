@@ -6,7 +6,8 @@ import RootNode from "./flow/RootNode";
 import SubagentNode, { type SubagentData } from "./flow/SubagentNode";
 import { computeLayout } from "./flow/layout";
 import UsageBar from "./UsageBar";
-import type { SubagentLog, UsageUpdate } from "./types";
+import SetupScreen from "./SetupScreen";
+import type { ModelOption, SubagentLog, UsageUpdate } from "./types";
 
 interface Agent {
   id: string; agentType: string; description: string | null;
@@ -86,12 +87,18 @@ export default function App() {
   const early = useRef<{ pty_id: string; d: Uint8Array }[]>([]);
   const root = useRef<HTMLDivElement>(null);
   const models = useRef<Record<string, string>>({});
+  const [dir, setDir] = useState("");
+  const [options, setOptions] = useState<ModelOption[]>([]);
+  const [chosen, setChosen] = useState<ModelOption | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const aliveRef = useRef(true);
+  const deliver = useCallback((d: Uint8Array) => (writer.current ? writer.current(d) : pending.current.push(d)), []);
   const register = useCallback((w: ((d: Uint8Array) => void) | null) => { writer.current = w; }, []);
 
   useEffect(() => {
-    let alive = true;
+    let alive = true; aliveRef.current = true;
     const un: (() => void)[] = [];
-    const deliver = (d: Uint8Array) => (writer.current ? writer.current(d) : pending.current.push(d));
     const add = (p: Promise<() => void>) => p.then((u) => (alive ? un.push(u) : u()));
     (async () => {
       // Todos os listeners ANTES do startMain.
@@ -112,15 +119,29 @@ export default function App() {
         add(api.onSubagentStop((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, status: "done", summary: e.last_message, doneAt: Date.now() } : a)))),
       ]);
       if (!alive) return;
-      const id = await api.startMain();
-      if (!alive) return;
+      try {
+        const [s, m] = await Promise.all([api.getSession(), api.listModels()]);
+        if (!alive) return;
+        setDir(s.dir);
+        setOptions(m);
+      } catch (e) { if (alive) setStartError(String(e)); }
+    })();
+    return () => { alive = false; aliveRef.current = false; un.forEach((u) => u()); };
+  }, [deliver]);
+
+  const start = useCallback(async (opt: ModelOption) => {
+    setStarting(true); setStartError(null);
+    try {
+      const id = await api.startMain(opt.id === "default" ? null : opt.id);
+      if (!aliveRef.current) return;
       idRef.current = id;
       early.current.filter((x) => x.pty_id === id).forEach((x) => deliver(x.d));
       early.current = [];
+      setChosen(opt);
       setPtyId(id);
-    })();
-    return () => { alive = false; un.forEach((u) => u()); };
-  }, []);
+    } catch (e) { setStartError(String(e)); }
+    finally { setStarting(false); }
+  }, [deliver]);
 
   // Tudo concluído: espera 4s e some com a árvore (o terminal volta a 100%).
   const allDone = agents.length > 0 && agents.every((a) => a.status === "done");
@@ -146,9 +167,14 @@ export default function App() {
     window.addEventListener("pointerup", up);
   };
 
+  if (!chosen) {
+    return <SetupScreen dir={dir} options={options} starting={starting} error={startError} onStart={start} />;
+  }
+
   return (
     <div ref={root} style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <UsageBar usage={usage} />
+      <div title={`Modelo: ${chosen.id}`} style={{ position: "fixed", top: 4, left: 14, zIndex: 50, fontSize: 11, color: "#9ca3af", padding: "2px 8px", borderRadius: 999, border: "1px solid #2a3040", background: "#12151c", pointerEvents: "none" }}>{chosen.label}</div>
       <div style={{ height: showTree ? `${split * 100}%` : "100%", transition: "height 0.25s ease", minHeight: 0, display: "flex", flexDirection: "column" }}>
         {exitCode !== null && (
           <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px" }}>sessão principal encerrada (código {exitCode})</div>

@@ -1,11 +1,12 @@
 // Fachada: usa o IPC do Tauri; no navegador (sem Tauri) usa um mock para validar a UI.
 import * as ipc from "./ipc";
-import type { LogKind, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
+import type { LogKind, PtyExit, PtyOutput, ModelOption, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
 
 type Unlisten = () => void;
 export interface Api {
   getSession(): Promise<SessionConfig>;
-  startMain(): Promise<string>;
+  listModels(): Promise<ModelOption[]>;
+  startMain(model: string | null): Promise<string>;
   writePty(id: string, data: string): Promise<void>;
   resizePty(id: string, cols: number, rows: number): Promise<void>;
   onSubagentStart(cb: (e: SubagentStart) => void): Promise<Unlisten>;
@@ -57,8 +58,15 @@ function createMock(): Api {
   };
 
   return {
-    getSession: async () => ({ dir: "/mock", model: null }),
-    startMain: async () => {
+    getSession: async () => ({ dir: "/mock" }),
+    listModels: async () => [
+      { provider: "anthropic", id: "opusplan", label: "Opus Plan (Opus planeja, Sonnet executa)", default: true },
+      { provider: "anthropic", id: "opus", label: "Opus", default: false },
+      { provider: "anthropic", id: "sonnet", label: "Sonnet", default: false },
+      { provider: "anthropic", id: "haiku", label: "Haiku", default: false },
+      { provider: "anthropic", id: "claude-opus-5-5", label: "Claude Opus 5.5", default: false },
+    ],
+    startMain: async (_model) => {
       let n = 0;
       const tickUsage = () => {
         const wob = Math.round(Math.sin(n++ / 2) * 3);
