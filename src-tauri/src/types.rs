@@ -25,6 +25,12 @@ pub struct SubagentLog {
     pub kind: String,
     pub text: String,
 }
+/// evento "subagent-model": modelo efetivamente usado pelo subagente (lido do transcript).
+#[derive(Debug, Clone, Serialize)]
+pub struct SubagentModel {
+    pub agent_id: String,
+    pub model: String,
+}
 /// evento "subagent-stop"
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentStop {
