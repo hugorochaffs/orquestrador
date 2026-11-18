@@ -98,6 +98,12 @@ export default function App() {
   const deliver = useCallback((d: Uint8Array) => (writer.current ? writer.current(d) : pending.current.push(d)), []);
   const register = useCallback((w: ((d: Uint8Array) => void) | null) => { writer.current = w; }, []);
 
+  // Sessão principal terminou bem (código 0): volta à tela inicial, limpando tudo da sessão anterior.
+  const backToStart = useCallback(() => {
+    idRef.current = null; early.current = []; pending.current.length = 0; models.current = {};
+    setAgents([]); setOpenId(null); setExitCode(null); setPtyId(null); setChosen(null); setStartError(null);
+  }, []);
+
   useEffect(() => {
     let alive = true; aliveRef.current = true;
     const un: (() => void)[] = [];
@@ -110,7 +116,10 @@ export default function App() {
           if (idRef.current === null) early.current.push({ pty_id: e.pty_id, d });
           else if (e.pty_id === idRef.current) deliver(d);
         })),
-        add(api.onPtyExit((e) => { if (e.pty_id === idRef.current) setExitCode(e.code); })),
+        add(api.onPtyExit((e) => {
+          if (e.pty_id !== idRef.current) return;
+          if (e.code === 0) backToStart(); else setExitCode(e.code);
+        })),
         add(api.onSubagentStart((e) => setAgents((s) => s.some((a) => a.id === e.agent_id) ? s : [...s, {
           id: e.agent_id, agentType: e.agent_type, description: e.description, status: "running",
           summary: null, logs: [], expanded: false, doneAt: null, model: models.current[e.agent_id] ?? null,
@@ -129,7 +138,15 @@ export default function App() {
       } catch (e) { if (alive) setStartError(String(e)); }
     })();
     return () => { alive = false; aliveRef.current = false; un.forEach((u) => u()); };
-  }, [deliver]);
+  }, [deliver, backToStart]);
+
+  // Ctrl+C na tela inicial fecha o app (no terminal principal o Ctrl+C é do Claude).
+  useEffect(() => {
+    if (chosen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.ctrlKey && e.key.toLowerCase() === "c") { e.preventDefault(); void api.quitApp(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chosen]);
 
   const start = useCallback(async (opt: ModelOption) => {
     setStarting(true); setStartError(null);
@@ -184,7 +201,10 @@ export default function App() {
       <div title={`Modelo: ${chosen.id}`} style={{ position: "fixed", top: 4, left: 14, zIndex: 50, fontSize: 11, color: "#9ca3af", padding: "2px 8px", borderRadius: 999, border: "1px solid #2a3040", background: "#12151c", pointerEvents: "none" }}>{chosen.label}</div>
       <div style={{ height: showTree ? `${split * 100}%` : "100%", transition: "height 0.25s ease", minHeight: 0, display: "flex", flexDirection: "column" }}>
         {exitCode !== null && (
-          <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px" }}>sessão principal encerrada (código {exitCode})</div>
+          <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px", display: "flex", gap: 12, alignItems: "center" }}>
+            sessão principal encerrada (código {exitCode})
+            <button onClick={backToStart} style={{ background: "#991b1b", color: "#fff", border: 0, borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}>Voltar ao início</button>
+          </div>
         )}
         <div style={{ flex: 1, minHeight: 0 }}>
           <MainTerminal ptyId={ptyId} pending={pending.current} register={register} resizeKey={resizeKey} />

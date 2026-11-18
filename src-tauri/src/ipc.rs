@@ -35,3 +35,9 @@ pub fn write_pty(pty: State<'_, Arc<PtyManager>>, id: String, data: String) -> R
 pub fn resize_pty(pty: State<'_, Arc<PtyManager>>, id: String, cols: u16, rows: u16) -> Result<(), String> {
     pty.resize(&id, cols, rows)
 }
+
+/// Fecha o app (Ctrl+C na tela inicial).
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}

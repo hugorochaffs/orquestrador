@@ -4,7 +4,7 @@ use crate::types::SessionConfig;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use tauri::AppHandle;
 
 /// Quoting POSIX de shell com aspas simples.
@@ -91,8 +91,13 @@ pub fn start(app: &AppHandle, session: &SessionConfig, model: Option<&str>, pty:
     let settings = hook_settings(&exe, &events, &usage);
     let argv = crate::tools::claude_argv(model, &settings);
 
-    crate::subagents::spawn_watcher(app.clone(), events);
-    crate::usage::spawn_watcher(app.clone(), usage);
+    // Os observadores vivem até o fim do app; reiniciar a sessão não pode duplicá-los
+    // (o arquivo de eventos é zerado acima e o observador recomeça do início ao vê-lo encolher).
+    static WATCHERS: Once = Once::new();
+    WATCHERS.call_once(|| {
+        crate::subagents::spawn_watcher(app.clone(), events);
+        crate::usage::spawn_watcher(app.clone(), usage);
+    });
     pty.spawn(app, "main", argv, &session.dir, Box::new(|_| {}))
 }
 

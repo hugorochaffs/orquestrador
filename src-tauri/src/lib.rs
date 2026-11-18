@@ -21,7 +21,8 @@ pub fn run(session: SessionConfig) {
             ipc::start_main,
             ipc::list_models,
             ipc::write_pty,
-            ipc::resize_pty
+            ipc::resize_pty,
+            ipc::quit_app
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o Orchestra");

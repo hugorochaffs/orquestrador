@@ -9,6 +9,7 @@ export interface Api {
   startMain(model: string | null): Promise<string>;
   writePty(id: string, data: string): Promise<void>;
   resizePty(id: string, cols: number, rows: number): Promise<void>;
+  quitApp(): Promise<void>;
   onSubagentStart(cb: (e: SubagentStart) => void): Promise<Unlisten>;
   onSubagentLog(cb: (e: SubagentLog) => void): Promise<Unlisten>;
   onSubagentModel(cb: (e: SubagentModel) => void): Promise<Unlisten>;
@@ -84,6 +85,7 @@ function createMock(): Api {
     },
     writePty: async (_id, data) => out(data === "\r" ? "\r\n" : data),
     resizePty: async () => {},
+    quitApp: async () => { window.close(); },
     onSubagentStart: on<SubagentStart>("start"),
     onSubagentLog: on<SubagentLog>("log"),
     onSubagentModel: on<SubagentModel>("model"),
