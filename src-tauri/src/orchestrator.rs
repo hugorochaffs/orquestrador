@@ -35,22 +35,56 @@ struct PtyRunner {
     app: AppHandle,
     pty: Arc<PtyManager>,
     tool: String,
+    dir: PathBuf,
 }
 
 impl TaskRunner for PtyRunner {
     fn start(&self, task_id: &str, prompt: &str, cwd: &Path, _resolver: bool) -> Result<(Option<String>, oneshot::Receiver<i32>), String> {
-        let argv = crate::tools::build_argv(&self.tool, None, prompt).ok_or_else(|| format!("ferramenta desconhecida: {}", self.tool))?;
+        let mdir = self.dir.join(".orchestra").join("markers");
+        std::fs::create_dir_all(&mdir).map_err(|e| e.to_string())?;
+        let safe: String = task_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+        let marker = mdir.join(format!("{safe}.done"));
+        let _ = std::fs::remove_file(&marker);
+        let argv = crate::tools::build_interactive_argv(&self.tool, None, prompt, &marker).ok_or_else(|| format!("ferramenta desconhecida: {}", self.tool))?;
         let (tx, rx) = oneshot::channel();
+        let exited = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ex = exited.clone();
+        let m2 = marker.clone();
         let id = self.pty.spawn(&self.app, task_id, argv, cwd, Box::new(move |c| {
-            let _ = tx.send(c);
+            ex.store(true, std::sync::atomic::Ordering::SeqCst);
+            // marker presente => sucesso, mesmo que /exit ou kill devolva outro código
+            let _ = tx.send(if m2.exists() { 0 } else { c });
         }))?;
+        let (pty, pid) = (self.pty.clone(), id.clone());
+        tokio::spawn(async move {
+            use std::sync::atomic::Ordering::SeqCst;
+            use std::time::Duration;
+            while !marker.exists() {
+                if exited.load(SeqCst) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            if exited.load(SeqCst) {
+                return;
+            }
+            let _ = pty.write(&pid, b"/exit\r");
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if exited.load(SeqCst) {
+                    return;
+                }
+            }
+            let _ = pty.kill(&pid);
+        });
         Ok((Some(id), rx))
     }
 }
 
 /// Executa o plano inteiro; emite "task-status" (ver types.rs).
 pub async fn run(o: Arc<Orchestrator>, app: AppHandle, s: SessionConfig, p: Plan, pty: Arc<PtyManager>) {
-    let runner = Arc::new(PtyRunner { app: app.clone(), pty, tool: s.tool.clone() });
+    let runner = Arc::new(PtyRunner { app: app.clone(), pty, tool: s.tool.clone(), dir: s.dir.clone() });
     let emit: Emit = Arc::new(move |e| {
         let _ = app.emit("task-status", e);
     });
