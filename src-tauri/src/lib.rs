@@ -1,10 +1,9 @@
 pub mod cli;
 pub mod detect;
-pub mod git;
 pub mod ipc;
-pub mod orchestrator;
-pub mod planner;
 pub mod pty;
+pub mod session;
+pub mod subagents;
 pub mod tools;
 pub mod types;
 
@@ -16,13 +15,11 @@ pub fn run(session: SessionConfig) {
     tauri::Builder::default()
         .manage(session)
         .manage(Arc::new(pty::PtyManager::default()))
-        .manage(Arc::new(orchestrator::Orchestrator::default()))
         .invoke_handler(tauri::generate_handler![
             ipc::get_session,
-            ipc::start_run,
+            ipc::start_main,
             ipc::write_pty,
-            ipc::resize_pty,
-            ipc::resolve_conflict
+            ipc::resize_pty
         ])
         .run(tauri::generate_context!())
         .expect("erro ao iniciar o Orchestra");

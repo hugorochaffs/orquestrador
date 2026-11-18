@@ -1,33 +1,22 @@
 //! Comandos Tauri. Contrato fixo; implementações delegam aos módulos.
-use crate::orchestrator::Orchestrator;
 use crate::pty::PtyManager;
 use crate::types::*;
-use crate::{orchestrator, planner};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub fn get_session(session: State<'_, SessionConfig>) -> SessionConfig {
     session.inner().clone()
 }
 
+/// Sobe o Claude Code interativo (terminal principal) e o observador de subagentes. Retorna o pty_id.
 #[tauri::command]
-pub async fn start_run(
+pub fn start_main(
     app: AppHandle,
     session: State<'_, SessionConfig>,
     pty: State<'_, Arc<PtyManager>>,
-    orch: State<'_, Arc<Orchestrator>>,
-) -> Result<Plan, String> {
-    let session = session.inner().clone();
-    let plan = planner::plan(&session).await?;
-    planner::validate(&plan)?;
-    let _ = app.emit("plan-ready", PlanReady { plan: plan.clone() });
-    let (pty, orch) = (pty.inner().clone(), orch.inner().clone());
-    let p = plan.clone();
-    tauri::async_runtime::spawn(async move {
-        orchestrator::run(orch, app, session, p, pty).await;
-    });
-    Ok(plan)
+) -> Result<String, String> {
+    crate::session::start(&app, session.inner(), pty.inner())
 }
 
 #[tauri::command]
@@ -36,20 +25,6 @@ pub fn write_pty(pty: State<'_, Arc<PtyManager>>, id: String, data: String) -> R
 }
 
 #[tauri::command]
-pub fn resize_pty(
-    pty: State<'_, Arc<PtyManager>>,
-    id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
+pub fn resize_pty(pty: State<'_, Arc<PtyManager>>, id: String, cols: u16, rows: u16) -> Result<(), String> {
     pty.resize(&id, cols, rows)
-}
-
-#[tauri::command]
-pub fn resolve_conflict(
-    orch: State<'_, Arc<Orchestrator>>,
-    task_id: String,
-    action: ConflictAction,
-) -> Result<(), String> {
-    orch.resolve(&task_id, action)
 }

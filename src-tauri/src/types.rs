@@ -5,63 +5,34 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
     pub dir: PathBuf,
-    /// id da ferramenta de execução: "claude" | "aider" | "cline"
-    pub tool: String,
-    pub provider: String,
-    pub planner_model: String,
-    pub goal: String,
-    pub mock_planner: bool,
+    /// modelo da sessão principal do Claude Code (ex.: "opus"); None = padrão
+    pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub id: String,
-    pub title: String,
-    pub prompt: String,
-    #[serde(default)]
-    pub depends_on: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Plan {
-    pub plan_summary: String,
-    pub tasks: Vec<Task>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Pending,
-    Running,
-    Merging,
-    Resolving,
-    Done,
-    Failed,
-    NeedsUser,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConflictAction {
-    Retry,
-    Abort,
-    ManualDone,
-}
-
-// ---- payloads de eventos Tauri ----
-/// evento "plan-ready"
+/// evento "subagent-start"
 #[derive(Debug, Clone, Serialize)]
-pub struct PlanReady {
-    pub plan: Plan,
+pub struct SubagentStart {
+    pub agent_id: String,
+    pub agent_type: String,
+    pub description: Option<String>,
+    pub prompt: Option<String>,
 }
-/// evento "task-status"
+/// evento "subagent-log": uma entrada nova do transcript do subagente.
 #[derive(Debug, Clone, Serialize)]
-pub struct TaskStatusEvent {
-    pub task_id: String,
-    pub status: TaskStatus,
-    /// pty associado (quando houver) para o nó se conectar ao terminal
-    pub pty_id: Option<String>,
+pub struct SubagentLog {
+    pub agent_id: String,
+    /// "user" | "text" | "tool" | "result"
+    pub kind: String,
+    pub text: String,
 }
+/// evento "subagent-stop"
+#[derive(Debug, Clone, Serialize)]
+pub struct SubagentStop {
+    pub agent_id: String,
+    pub last_message: Option<String>,
+}
+
+// ---- terminal principal (PTY). task_id é sempre "main" ----
 /// evento "pty-output" (data em base64)
 #[derive(Debug, Clone, Serialize)]
 pub struct PtyOutput {
