@@ -5,8 +5,15 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionConfig {
     pub dir: PathBuf,
-    /// modelo da sessão principal do Claude Code (ex.: "opus"); None = padrão
-    pub model: Option<String>,
+}
+
+/// Opção de modelo exibida na GUI. Espelhada em `ModelOption` (src/types.ts).
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelOption {
+    pub provider: String,
+    pub id: String,
+    pub label: String,
+    pub default: bool,
 }
 
 /// evento "subagent-start"

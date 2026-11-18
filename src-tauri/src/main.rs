@@ -23,7 +23,7 @@ fn main() {
         }
         return;
     }
-    let session = orchestra_lib::cli::parse_and_wizard(args).unwrap_or_else(|e| {
+    let session = orchestra_lib::cli::parse_session(args).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);
     });

@@ -15,8 +15,15 @@ pub fn start_main(
     app: AppHandle,
     session: State<'_, SessionConfig>,
     pty: State<'_, Arc<PtyManager>>,
+    model: Option<String>,
 ) -> Result<String, String> {
-    crate::session::start(&app, session.inner(), pty.inner())
+    crate::session::start(&app, session.inner(), model.as_deref(), pty.inner())
+}
+
+/// Modelos disponíveis para escolha na GUI.
+#[tauri::command]
+pub fn list_models() -> Vec<ModelOption> {
+    crate::tools::models()
 }
 
 #[tauri::command]
