@@ -66,11 +66,11 @@ pub fn browser_options(cfg: &crate::config::Config) -> Vec<BrowserOption> {
 }
 
 /// Argv interativo (sem prompt: o usuário digita o objetivo no terminal).
-/// Roda em modo `auto` e com `CLAUDE_CODE_AUTO_CONNECT_IDE=false` (só nesta sessão), para que os diffs
+/// Roda em modo `auto` (o PTY define `CLAUDE_CODE_AUTO_CONNECT_IDE=false`, só nesta sessão), para que os diffs
 /// não abram no VS Code/JetBrains e fiquem no terminal. `browser` liga (`--chrome`) ou desliga (`--no-chrome`)
 /// o Claude in Chrome.
 pub fn claude_argv(model: Option<&str>, settings_json: &str, browser: bool) -> Vec<String> {
-    let mut v: Vec<String> = ["env", "CLAUDE_CODE_AUTO_CONNECT_IDE=false", "claude", "--permission-mode", "auto", "--settings"]
+    let mut v: Vec<String> = ["claude", "--permission-mode", "auto", "--settings"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -93,12 +93,12 @@ mod tests {
     fn argv_with_and_without_model() {
         let a = claude_argv(None, "{}", false);
         assert_eq!(
-            &a[..8],
-            ["env", "CLAUDE_CODE_AUTO_CONNECT_IDE=false", "claude", "--permission-mode", "auto", "--settings", "{}", "--no-chrome"]
+            &a[..6],
+            ["claude", "--permission-mode", "auto", "--settings", "{}", "--no-chrome"]
         );
-        assert_eq!(&a[8..], ["--append-system-prompt", ORCHESTRATOR_PROMPT]);
+        assert_eq!(&a[6..], ["--append-system-prompt", ORCHESTRATOR_PROMPT]);
         let b = claude_argv(Some("opus"), "{}", false);
-        assert_eq!(&b[10..], ["--model", "opus"]);
+        assert_eq!(&b[8..], ["--model", "opus"]);
         assert_eq!(claude_argv(Some("default"), "{}", false).len(), a.len());
     }
 

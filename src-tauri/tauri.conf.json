@@ -30,6 +30,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Interface com abas e orquestração de subagentes para o Claude Code",
+    "longDescription": "Orchestra roda o Claude Code num terminal real com abas e mostra cada subagente numa árvore ao vivo."
   }
 }

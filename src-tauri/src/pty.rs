@@ -70,10 +70,14 @@ impl PtyManager {
         let pair = native_pty_system()
             .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| e.to_string())?;
-        let mut cmd = CommandBuilder::new(&argv[0]);
+        // Resolve o executável no PATH (no Windows o `claude` é um shim .cmd/.exe que o ConPTY não acha sozinho).
+        let exe = which::which(&argv[0]).map(|p| p.into_os_string()).unwrap_or_else(|_| argv[0].clone().into());
+        let mut cmd = CommandBuilder::new(exe);
         cmd.args(&argv[1..]);
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+        // Só nesta sessão: os diffs ficam no terminal em vez de abrir no VS Code/JetBrains (sem depender do `env` do Unix).
+        cmd.env("CLAUDE_CODE_AUTO_CONNECT_IDE", "false");
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;

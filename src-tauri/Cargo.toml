@@ -1,8 +1,8 @@
 [package]
 name = "orchestra"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Interface com abas e orquestração de subagentes para o Claude Code"
+authors = ["Hugo Moura"]
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
