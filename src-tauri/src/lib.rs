@@ -6,6 +6,7 @@ pub mod session;
 pub mod subagents;
 pub mod tools;
 pub mod types;
+pub mod usage;
 
 use std::sync::Arc;
 use types::SessionConfig;

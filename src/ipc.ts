@@ -14,3 +14,4 @@ export const onSubagentModel = (cb: (e: SubagentModel) => void): Promise<Unliste
 export const onSubagentStop = (cb: (e: SubagentStop) => void): Promise<UnlistenFn> => listen<SubagentStop>("subagent-stop", (e) => cb(e.payload));
 export const onPtyOutput = (cb: (e: PtyOutput) => void): Promise<UnlistenFn> => listen<PtyOutput>("pty-output", (e) => cb(e.payload));
 export const onPtyExit = (cb: (e: PtyExit) => void): Promise<UnlistenFn> => listen<PtyExit>("pty-exit", (e) => cb(e.payload));
+export const onUsageUpdate = (cb: (e: UsageUpdate) => void): Promise<UnlistenFn> => listen<UsageUpdate>("usage-update", (e) => cb(e.payload));

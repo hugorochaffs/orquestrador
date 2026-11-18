@@ -53,3 +53,17 @@ pub struct PtyExit {
     pub task_id: String,
     pub code: i32,
 }
+
+/// evento "usage-update": uso de cota de uma IA (hoje só "claude", lido do statusLine do Claude Code).
+/// Janelas ausentes (ex.: plano sem rate_limits) vêm como None.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UsageUpdate {
+    /// "claude" (futuro: outras IAs)
+    pub provider: String,
+    /// % da janela de 5h (0–100) e epoch (s) do reset
+    pub session_pct: Option<f64>,
+    pub session_resets_at: Option<i64>,
+    /// % da janela semanal (0–100) e epoch (s) do reset
+    pub week_pct: Option<f64>,
+    pub week_resets_at: Option<i64>,
+}
