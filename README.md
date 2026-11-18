@@ -42,7 +42,7 @@ Navigate to any project folder and run:
 ```bash
 orquestrador .
 ```
-Pick the model in the terminal prompt, then type your goal in the main terminal. Ask Claude to use subagents (or let it decide) and the tree builds itself. The session starts in `acceptEdits` permission mode (Shift+Tab to change).
+Pick provider and model in the app's start screen (default: `opusplan`), then type your goal in the main terminal. Ask Claude to use subagents (or let it decide) and the tree builds itself. The session starts in `auto` permission mode (Shift+Tab to change) with IDE diff integration disabled, so diffs stay in the terminal.
 
 ## 🧪 Development
 ```bash

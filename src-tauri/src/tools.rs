@@ -36,8 +36,10 @@ pub fn models() -> Vec<ModelOption> {
 }
 
 /// Argv interativo (sem prompt: o usuário digita o objetivo no terminal).
+/// Roda em modo `auto` e com `CLAUDE_CODE_AUTO_CONNECT_IDE=false` (só nesta sessão), para que os diffs
+/// não abram no VS Code/JetBrains e fiquem no terminal.
 pub fn claude_argv(model: Option<&str>, settings_json: &str) -> Vec<String> {
-    let mut v: Vec<String> = ["claude", "--permission-mode", "acceptEdits", "--settings"]
+    let mut v: Vec<String> = ["env", "CLAUDE_CODE_AUTO_CONNECT_IDE=false", "claude", "--permission-mode", "auto", "--settings"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -58,10 +60,13 @@ mod tests {
     #[test]
     fn argv_with_and_without_model() {
         let a = claude_argv(None, "{}");
-        assert_eq!(&a[..5], ["claude", "--permission-mode", "acceptEdits", "--settings", "{}"]);
-        assert_eq!(&a[5..], ["--append-system-prompt", ORCHESTRATOR_PROMPT]);
+        assert_eq!(
+            &a[..7],
+            ["env", "CLAUDE_CODE_AUTO_CONNECT_IDE=false", "claude", "--permission-mode", "auto", "--settings", "{}"]
+        );
+        assert_eq!(&a[7..], ["--append-system-prompt", ORCHESTRATOR_PROMPT]);
         let b = claude_argv(Some("opus"), "{}");
-        assert_eq!(&b[7..], ["--model", "opus"]);
+        assert_eq!(&b[9..], ["--model", "opus"]);
         assert_eq!(claude_argv(Some("default"), "{}").len(), a.len());
     }
 
