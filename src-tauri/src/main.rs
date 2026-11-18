@@ -14,6 +14,15 @@ fn main() {
         }
         return;
     }
+    if args.first().map(String::as_str) == Some("statusline") {
+        // Subcomando do statusLine do Claude Code: grava o JSON de uso; nunca imprime, sempre sai com 0.
+        if let Some(file) = args.get(1) {
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            orchestra_lib::session::run_statusline(std::path::Path::new(file), &input);
+        }
+        return;
+    }
     let session = orchestra_lib::cli::parse_and_wizard(args).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);

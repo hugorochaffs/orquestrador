@@ -12,16 +12,22 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-/// JSON de `--settings` com hooks que chamam `<exe> hook <events_file>`.
-pub fn hook_settings(exe: &Path, events_file: &Path) -> String {
+/// JSON de `--settings` com hooks que chamam `<exe> hook <events_file>` e statusLine que chama
+/// `<exe> statusline <usage_file>`.
+pub fn hook_settings(exe: &Path, events_file: &Path, usage_file: &Path) -> String {
     let cmd = format!(
         "{} hook {}",
         shell_quote(&exe.to_string_lossy()),
         shell_quote(&events_file.to_string_lossy())
     );
+    let status_cmd = format!(
+        "{} statusline {}",
+        shell_quote(&exe.to_string_lossy()),
+        shell_quote(&usage_file.to_string_lossy())
+    );
     let hooks = json!([{ "type": "command", "command": cmd }]);
     let plain = json!([{ "hooks": hooks }]);
-    let v: Value = json!({ "hooks": {
+    let v: Value = json!({ "statusLine": { "type": "command", "command": status_cmd }, "hooks": {
         "SubagentStart": plain,
         "SubagentStop": plain,
         "PreToolUse": [{ "matcher": "Agent|Task", "hooks": hooks }],
@@ -36,6 +42,19 @@ pub fn run_hook(events_file: &Path, input: &str) {
     line.push('\n');
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(events_file) {
         let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// Implementação do subcomando `statusline`: valida o JSON e grava atomicamente (tmp + rename). Nunca falha.
+pub fn run_statusline(usage_file: &Path, input: &str) {
+    if serde_json::from_str::<Value>(input).is_err() {
+        return;
+    }
+    let mut tmp = usage_file.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    if std::fs::write(&tmp, input.as_bytes()).is_ok() {
+        let _ = std::fs::rename(&tmp, usage_file);
     }
 }
 
@@ -68,10 +87,12 @@ pub fn start(app: &AppHandle, session: &SessionConfig, pty: &Arc<PtyManager>) ->
     exclude_orchestra(&session.dir);
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let settings = hook_settings(&exe, &events);
+    let usage = odir.join("usage.json");
+    let settings = hook_settings(&exe, &events, &usage);
     let argv = crate::tools::claude_argv(session.model.as_deref(), &settings);
 
     crate::subagents::spawn_watcher(app.clone(), events);
+    crate::usage::spawn_watcher(app.clone(), usage);
     pty.spawn(app, "main", argv, &session.dir, Box::new(|_| {}))
 }
 
@@ -88,13 +109,30 @@ mod tests {
 
     #[test]
     fn settings_json() {
-        let s = hook_settings(Path::new("/opt/my app/orchestra"), Path::new("/p/e.jsonl"));
+        let s = hook_settings(
+            Path::new("/opt/my app/orchestra"),
+            Path::new("/p/e.jsonl"),
+            Path::new("/p/u.json"),
+        );
         let v: Value = serde_json::from_str(&s).unwrap();
         let cmd = "'/opt/my app/orchestra' hook '/p/e.jsonl'";
+        assert_eq!(v["statusLine"]["type"], "command");
+        assert_eq!(v["statusLine"]["command"], "'/opt/my app/orchestra' statusline '/p/u.json'");
         assert_eq!(v["hooks"]["SubagentStart"][0]["hooks"][0]["command"], cmd);
         assert_eq!(v["hooks"]["SubagentStop"][0]["hooks"][0]["type"], "command");
         assert_eq!(v["hooks"]["PreToolUse"][0]["matcher"], "Agent|Task");
         assert_eq!(v["hooks"]["PreToolUse"][0]["hooks"][0]["command"], cmd);
+    }
+
+    #[test]
+    fn statusline_writes_atomically() {
+        let f: PathBuf = std::env::temp_dir().join(format!("orch_usage_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&f);
+        run_statusline(&f, "lixo");
+        assert!(!f.exists());
+        run_statusline(&f, "{\"a\": 1}");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "{\"a\": 1}");
+        let _ = std::fs::remove_file(&f);
     }
 
     #[test]
