@@ -30,12 +30,12 @@ pub fn parse_usage(s: &str) -> Option<UsageUpdate> {
 }
 
 /// `usage_file`: JSON único (sobrescrito a cada atualização) com o payload bruto do statusLine do Claude Code.
-pub fn spawn_watcher(app: AppHandle, usage_file: PathBuf) {
+pub fn spawn_watcher(app: AppHandle, usage_file: PathBuf, interval: Duration) {
     std::thread::spawn(move || {
         let mut last_mtime: Option<SystemTime> = None;
         let mut last: Option<UsageUpdate> = None;
         loop {
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(interval);
             let Ok(mtime) = std::fs::metadata(&usage_file).and_then(|m| m.modified()) else { continue };
             if last_mtime == Some(mtime) {
                 continue;

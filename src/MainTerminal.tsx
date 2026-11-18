@@ -6,6 +6,8 @@ import { api } from "./api";
 export const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 interface Props {
+  /** Aba visível: refaz o fit e foca o terminal ao voltar a ela. */
+  active: boolean;
   ptyId: string | null;
   /** Saída já filtrada por pty_id que chegou antes do xterm montar. */
   pending: Uint8Array[];
@@ -15,7 +17,7 @@ interface Props {
   resizeKey: number;
 }
 
-export default function MainTerminal({ ptyId, pending, register, resizeKey }: Props) {
+export default function MainTerminal({ active, ptyId, pending, register, resizeKey }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -48,6 +50,7 @@ export default function MainTerminal({ ptyId, pending, register, resizeKey }: Pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => { if (active) { doFit(); term.current?.focus(); } }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(doFit, [ptyId, resizeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div ref={host} style={{ width: "100%", height: "100%", padding: 4, boxSizing: "border-box", background: "#0b0d11" }} />;

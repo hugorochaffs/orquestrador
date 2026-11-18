@@ -4,7 +4,9 @@ use crate::types::SessionConfig;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Arc, Once};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Once};
 use tauri::AppHandle;
 
 /// Quoting POSIX de shell com aspas simples.
@@ -14,7 +16,7 @@ pub fn shell_quote(s: &str) -> String {
 
 /// JSON de `--settings` com hooks que chamam `<exe> hook <events_file>` e statusLine que chama
 /// `<exe> statusline <usage_file>`.
-pub fn hook_settings(exe: &Path, events_file: &Path, usage_file: &Path) -> String {
+pub fn hook_settings(exe: &Path, events_file: &Path, usage_file: &Path, refresh_secs: u64) -> String {
     let cmd = format!(
         "{} hook {}",
         shell_quote(&exe.to_string_lossy()),
@@ -27,10 +29,14 @@ pub fn hook_settings(exe: &Path, events_file: &Path, usage_file: &Path) -> Strin
     );
     let hooks = json!([{ "type": "command", "command": cmd }]);
     let plain = json!([{ "hooks": hooks }]);
-    let v: Value = json!({ "statusLine": { "type": "command", "command": status_cmd }, "hooks": {
+    let v: Value = json!({ "statusLine": { "type": "command", "command": status_cmd, "refreshInterval": refresh_secs }, "hooks": {
         "SubagentStart": plain,
         "SubagentStop": plain,
-        "PreToolUse": [{ "matcher": "Agent|Task", "hooks": hooks }],
+        "PreToolUse": [
+            { "matcher": "Agent|Task", "hooks": hooks },
+            // Claude in Chrome: avisa o Orchestra que o navegador externo está em uso (aba marcador).
+            { "matcher": "mcp__claude-in-chrome__.*", "hooks": hooks },
+        ],
     }});
     v.to_string()
 }
@@ -51,7 +57,7 @@ pub fn run_statusline(usage_file: &Path, input: &str) {
         return;
     }
     let mut tmp = usage_file.as_os_str().to_owned();
-    tmp.push(".tmp");
+    tmp.push(format!(".tmp{}", std::process::id())); // várias sessões escrevem o mesmo arquivo
     let tmp = std::path::PathBuf::from(tmp);
     if std::fs::write(&tmp, input.as_bytes()).is_ok() {
         let _ = std::fs::rename(&tmp, usage_file);
@@ -78,33 +84,82 @@ fn exclude_orchestra(dir: &Path) {
     }
 }
 
-/// Spawna o claude interativo (task_id "main"), chama `crate::subagents::spawn_watcher` e devolve o pty_id.
-pub fn start(app: &AppHandle, session: &SessionConfig, model: Option<&str>, pty: &Arc<PtyManager>) -> Result<String, String> {
+/// Sessões abertas (uma por aba): pty e flag de parada do watcher de cada uma.
+#[derive(Default)]
+pub struct Sessions {
+    tabs: Mutex<HashMap<String, (String, Arc<AtomicBool>)>>,
+}
+
+impl Sessions {
+    /// Fecha a sessão da aba: para o watcher e mata o PTY (se ainda vivo). Idempotente.
+    pub fn close(&self, tab_id: &str, pty: &PtyManager) {
+        if let Some((pty_id, stop)) = self.tabs.lock().unwrap().remove(tab_id) {
+            stop.store(true, Ordering::SeqCst);
+            let _ = pty.kill(&pty_id);
+        }
+    }
+}
+
+/// O id da aba vira nome de pasta: só letras, dígitos, `-` e `_`.
+pub fn valid_tab_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Spawna o claude interativo da aba (task_id = `tab_id`), inicia o watcher dela e devolve o pty_id.
+pub fn start(
+    app: &AppHandle,
+    session: &SessionConfig,
+    tab_id: &str,
+    model: Option<&str>,
+    browser: bool,
+    pty: &Arc<PtyManager>,
+    sessions: &Sessions,
+) -> Result<String, String> {
+    if !valid_tab_id(tab_id) {
+        return Err("id de aba inválido".into());
+    }
+    sessions.close(tab_id, pty); // recomeçar na mesma aba não pode duplicar PTY/watcher
     let odir = session.dir.join(".orchestra");
-    std::fs::create_dir_all(&odir).map_err(|e| format!("falha ao criar .orchestra: {e}"))?;
-    let events = odir.join("events.jsonl");
+    let tdir = odir.join(tab_id);
+    std::fs::create_dir_all(&tdir).map_err(|e| format!("falha ao criar .orchestra: {e}"))?;
+    let events = tdir.join("events.jsonl");
     std::fs::write(&events, b"").map_err(|e| format!("falha ao criar events.jsonl: {e}"))?;
     exclude_orchestra(&session.dir);
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let usage = odir.join("usage.json");
-    let settings = hook_settings(&exe, &events, &usage);
-    let argv = crate::tools::claude_argv(model, &settings);
+    let usage = odir.join("usage.json"); // uso é da conta: compartilhado entre as abas
+    let refresh = crate::config::Config::load().usage_refresh_secs;
+    let settings = hook_settings(&exe, &events, &usage, refresh);
+    let argv = crate::tools::claude_argv(model, &settings, browser);
 
-    // Os observadores vivem até o fim do app; reiniciar a sessão não pode duplicá-los
-    // (o arquivo de eventos é zerado acima e o observador recomeça do início ao vê-lo encolher).
-    static WATCHERS: Once = Once::new();
-    WATCHERS.call_once(|| {
-        crate::subagents::spawn_watcher(app.clone(), events);
-        crate::usage::spawn_watcher(app.clone(), usage);
+    // O observador de uso vive até o fim do app e é único.
+    static USAGE: Once = Once::new();
+    USAGE.call_once(|| {
+        crate::usage::spawn_watcher(app.clone(), usage, std::time::Duration::from_secs(refresh));
     });
-    pty.spawn(app, "main", argv, &session.dir, Box::new(|_| {}))
+    let stop = crate::subagents::spawn_watcher(app.clone(), tab_id.to_string(), events);
+    match pty.spawn(app, tab_id, argv, &session.dir, Box::new(|_| {})) {
+        Ok(pty_id) => {
+            sessions.tabs.lock().unwrap().insert(tab_id.to_string(), (pty_id.clone(), stop));
+            Ok(pty_id)
+        }
+        Err(e) => {
+            stop.store(true, Ordering::SeqCst);
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn tab_id_valido() {
+        assert!(valid_tab_id("t1") && valid_tab_id("a-b_C9"));
+        assert!(!valid_tab_id("") && !valid_tab_id("../x") && !valid_tab_id("a b"));
+    }
 
     #[test]
     fn quoting() {
@@ -118,15 +173,19 @@ mod tests {
             Path::new("/opt/my app/orchestra"),
             Path::new("/p/e.jsonl"),
             Path::new("/p/u.json"),
+            5,
         );
         let v: Value = serde_json::from_str(&s).unwrap();
         let cmd = "'/opt/my app/orchestra' hook '/p/e.jsonl'";
         assert_eq!(v["statusLine"]["type"], "command");
         assert_eq!(v["statusLine"]["command"], "'/opt/my app/orchestra' statusline '/p/u.json'");
+        assert_eq!(v["statusLine"]["refreshInterval"], 5);
         assert_eq!(v["hooks"]["SubagentStart"][0]["hooks"][0]["command"], cmd);
         assert_eq!(v["hooks"]["SubagentStop"][0]["hooks"][0]["type"], "command");
         assert_eq!(v["hooks"]["PreToolUse"][0]["matcher"], "Agent|Task");
         assert_eq!(v["hooks"]["PreToolUse"][0]["hooks"][0]["command"], cmd);
+        assert_eq!(v["hooks"]["PreToolUse"][1]["matcher"], "mcp__claude-in-chrome__.*");
+        assert_eq!(v["hooks"]["PreToolUse"][1]["hooks"][0]["command"], cmd);
     }
 
     #[test]

@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ModelOption, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
+import type { BrowserOpen, BrowserOption, ModelOption, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
 
 export const getSession = () => invoke<SessionConfig>("get_session");
 /** Sobe o claude principal com o modelo escolhido na tela inicial (null = padrão do claude); devolve o pty_id. Registre os listeners ANTES. */
 export const listModels = () => invoke<ModelOption[]>("list_models");
-export const startMain = (model: string | null) => invoke<string>("start_main", { model });
+export const startMain = (tabId: string, model: string | null, browser: boolean) => invoke<string>("start_main", { tabId, model, browser });
+export const closeTab = (tabId: string) => invoke<void>("close_tab", { tabId });
+export const listBrowserOptions = () => invoke<BrowserOption[]>("list_browser_options");
+export const onBrowserOpen = (cb: (e: BrowserOpen) => void): Promise<UnlistenFn> => listen<BrowserOpen>("browser-open", (e) => cb(e.payload));
 export const writePty = (id: string, data: string) => invoke<void>("write_pty", { id, data });
 export const resizePty = (id: string, cols: number, rows: number) => invoke<void>("resize_pty", { id, cols, rows });
 

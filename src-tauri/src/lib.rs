@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod config;
 pub mod detect;
 pub mod ipc;
 pub mod pty;
@@ -16,9 +17,12 @@ pub fn run(session: SessionConfig) {
     tauri::Builder::default()
         .manage(session)
         .manage(Arc::new(pty::PtyManager::default()))
+        .manage(session::Sessions::default())
         .invoke_handler(tauri::generate_handler![
             ipc::get_session,
             ipc::start_main,
+            ipc::close_tab,
+            ipc::list_browser_options,
             ipc::list_models,
             ipc::write_pty,
             ipc::resize_pty,

@@ -19,6 +19,7 @@ pub struct ModelOption {
 /// evento "subagent-start"
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentStart {
+    pub tab_id: String,
     pub agent_id: String,
     pub agent_type: String,
     pub description: Option<String>,
@@ -27,6 +28,7 @@ pub struct SubagentStart {
 /// evento "subagent-log": uma entrada nova do transcript do subagente.
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentLog {
+    pub tab_id: String,
     pub agent_id: String,
     /// "user" | "text" | "tool" | "result"
     pub kind: String,
@@ -35,17 +37,36 @@ pub struct SubagentLog {
 /// evento "subagent-model": modelo efetivamente usado pelo subagente (lido do transcript).
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentModel {
+    pub tab_id: String,
     pub agent_id: String,
     pub model: String,
 }
 /// evento "subagent-stop"
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentStop {
+    pub tab_id: String,
     pub agent_id: String,
     pub last_message: Option<String>,
 }
 
-// ---- terminal principal (PTY). task_id é sempre "main" ----
+/// evento "browser-open": o Claude usou o navegador (Claude in Chrome) na aba `tab_id` (1ª vez por sessão).
+#[derive(Debug, Clone, Serialize)]
+pub struct BrowserOpen {
+    pub tab_id: String,
+}
+
+/// Forma de uma IA usar o navegador, exibida como switch na tela inicial. Espelhada em `BrowserOption`.
+#[derive(Debug, Clone, Serialize)]
+pub struct BrowserOption {
+    /// mesmo `provider` dos `ModelOption`
+    pub provider: String,
+    pub label: String,
+    pub note: String,
+    /// última escolha persistida em config.json
+    pub enabled: bool,
+}
+
+// ---- terminal de uma aba (PTY). task_id é o id da aba ----
 /// evento "pty-output" (data em base64)
 #[derive(Debug, Clone, Serialize)]
 pub struct PtyOutput {

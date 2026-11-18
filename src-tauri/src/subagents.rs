@@ -1,10 +1,12 @@
 //! Observa o arquivo de eventos dos hooks e os transcripts dos subagentes.
-use crate::types::{SubagentLog, SubagentModel, SubagentStart, SubagentStop};
+use crate::types::{BrowserOpen, SubagentLog, SubagentModel, SubagentStart, SubagentStop};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -15,6 +17,8 @@ pub enum Event {
     Log(String, String, String),
     Stop(String, Option<String>),
     Model(String, String),
+    /// O Claude usou uma ferramenta do navegador (Claude in Chrome); só na 1ª vez por sessão.
+    Browser,
 }
 
 /// Leitor incremental de linhas completas de um arquivo.
@@ -71,6 +75,7 @@ pub struct Watcher<F: FnMut(Event)> {
     tail: Tail,
     queue: VecDeque<Pending>,
     active: HashMap<String, Active>,
+    browser_seen: bool,
     emit: F,
 }
 
@@ -185,9 +190,12 @@ fn find_transcript(dir: &Path, agent_id: &str) -> Option<PathBuf> {
         .find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(&suffix)))
 }
 
+/// Prefixo das ferramentas MCP do Claude in Chrome.
+pub const BROWSER_TOOL_PREFIX: &str = "mcp__claude-in-chrome__";
+
 impl<F: FnMut(Event)> Watcher<F> {
     pub fn new(events_file: PathBuf, emit: F) -> Self {
-        Self { events_file, tail: Tail::default(), queue: VecDeque::new(), active: HashMap::new(), emit }
+        Self { events_file, tail: Tail::default(), queue: VecDeque::new(), active: HashMap::new(), browser_seen: false, emit }
     }
 
     pub fn tick(&mut self) {
@@ -201,6 +209,14 @@ impl<F: FnMut(Event)> Watcher<F> {
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         match str_of(&v, "hook_event_name").unwrap_or("") {
             "PreToolUse" => {
+                // Ferramentas do Claude in Chrome (inclusive as usadas por subagentes): marca o navegador em uso.
+                if str_of(&v, "tool_name").is_some_and(|n| n.starts_with(BROWSER_TOOL_PREFIX)) {
+                    if !self.browser_seen {
+                        self.browser_seen = true;
+                        (self.emit)(Event::Browser);
+                    }
+                    return;
+                }
                 if v.get("agent_id").is_some() {
                     return;
                 }
@@ -276,29 +292,36 @@ impl<F: FnMut(Event)> Watcher<F> {
     }
 }
 
-/// `events_file`: JSONL em que cada linha é o JSON bruto de um hook do Claude Code.
-/// Emite "subagent-start", "subagent-log", "subagent-stop".
-pub fn spawn_watcher(app: AppHandle, events_file: PathBuf) {
+/// `events_file`: JSONL em que cada linha é o JSON bruto de um hook do Claude Code da aba `tab_id`.
+/// Emite "subagent-start", "subagent-log", "subagent-model", "subagent-stop" e "browser-open" (todos com `tab_id`).
+/// Devolve a flag que, ao ser ligada, encerra a thread do watcher.
+pub fn spawn_watcher(app: AppHandle, tab_id: String, events_file: PathBuf) -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
     std::thread::spawn(move || {
         let mut w = Watcher::new(events_file, move |e| match e {
             Event::Start(agent_id, agent_type, description, prompt) => {
-                let _ = app.emit("subagent-start", SubagentStart { agent_id, agent_type, description, prompt });
+                let _ = app.emit("subagent-start", SubagentStart { tab_id: tab_id.clone(), agent_id, agent_type, description, prompt });
             }
             Event::Log(agent_id, kind, text) => {
-                let _ = app.emit("subagent-log", SubagentLog { agent_id, kind, text });
+                let _ = app.emit("subagent-log", SubagentLog { tab_id: tab_id.clone(), agent_id, kind, text });
             }
             Event::Model(agent_id, model) => {
-                let _ = app.emit("subagent-model", SubagentModel { agent_id, model });
+                let _ = app.emit("subagent-model", SubagentModel { tab_id: tab_id.clone(), agent_id, model });
             }
             Event::Stop(agent_id, last_message) => {
-                let _ = app.emit("subagent-stop", SubagentStop { agent_id, last_message });
+                let _ = app.emit("subagent-stop", SubagentStop { tab_id: tab_id.clone(), agent_id, last_message });
+            }
+            Event::Browser => {
+                let _ = app.emit("browser-open", BrowserOpen { tab_id: tab_id.clone() });
             }
         });
-        loop {
+        while !flag.load(Ordering::SeqCst) {
             w.tick();
             std::thread::sleep(Duration::from_millis(300));
         }
     });
+    stop
 }
 
 #[cfg(test)]
@@ -322,6 +345,26 @@ mod tests {
         assert_eq!(r, vec![("result".to_string(), "x".to_string())]);
         assert!(parse_transcript_line("lixo").is_empty());
         assert!(parse_transcript_line(r#"{"type":"user"}"#).is_empty());
+    }
+
+    #[test]
+    fn browser_detectado_uma_vez() {
+        let dir = std::env::temp_dir().join(format!("orch-br-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ev = dir.join("events.jsonl");
+        let mut events = Vec::new();
+        {
+            let mut w = Watcher::new(ev.clone(), |e| events.push(e));
+            let mut f = File::create(&ev).unwrap();
+            writeln!(f, r#"{{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{}}}}"#).unwrap();
+            w.tick();
+            writeln!(f, r#"{{"hook_event_name":"PreToolUse","tool_name":"mcp__claude-in-chrome__tabs_context_mcp","tool_input":{{}}}}"#).unwrap();
+            writeln!(f, r#"{{"hook_event_name":"PreToolUse","tool_name":"mcp__claude-in-chrome__navigate","tool_input":{{}}}}"#).unwrap();
+            w.tick();
+        }
+        assert_eq!(events, vec![Event::Browser]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
