@@ -5,7 +5,8 @@ import MainTerminal, { b64 } from "./MainTerminal";
 import RootNode from "./flow/RootNode";
 import SubagentNode, { type SubagentData } from "./flow/SubagentNode";
 import { computeLayout } from "./flow/layout";
-import type { SubagentLog } from "./types";
+import UsageBar from "./UsageBar";
+import type { SubagentLog, UsageUpdate } from "./types";
 
 interface Agent {
   id: string; agentType: string; description: string | null;
@@ -76,6 +77,7 @@ export default function App() {
   const [ptyId, setPtyId] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [usage, setUsage] = useState<Record<string, UsageUpdate>>({});
   const [split, setSplit] = useState(0.45);
   const [resizeKey, setResizeKey] = useState(0);
   const pending = useRef<Uint8Array[]>([]);
@@ -106,6 +108,7 @@ export default function App() {
         }]))),
         add(api.onSubagentModel((e) => { models.current[e.agent_id] = e.model; setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, model: e.model } : a)); })),
         add(api.onSubagentLog((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, logs: [...a.logs, e] } : a)))),
+        add(api.onUsageUpdate((e) => setUsage((s) => ({ ...s, [e.provider]: e })))),
         add(api.onSubagentStop((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, status: "done", summary: e.last_message, doneAt: Date.now() } : a)))),
       ]);
       if (!alive) return;
@@ -145,6 +148,7 @@ export default function App() {
 
   return (
     <div ref={root} style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <UsageBar usage={usage} />
       <div style={{ height: showTree ? `${split * 100}%` : "100%", transition: "height 0.25s ease", minHeight: 0, display: "flex", flexDirection: "column" }}>
         {exitCode !== null && (
           <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px" }}>sessão principal encerrada (código {exitCode})</div>

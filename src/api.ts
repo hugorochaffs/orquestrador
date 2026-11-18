@@ -1,6 +1,6 @@
 // Fachada: usa o IPC do Tauri; no navegador (sem Tauri) usa um mock para validar a UI.
 import * as ipc from "./ipc";
-import type { LogKind, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop } from "./types";
+import type { LogKind, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
 
 type Unlisten = () => void;
 export interface Api {
@@ -12,6 +12,7 @@ export interface Api {
   onSubagentLog(cb: (e: SubagentLog) => void): Promise<Unlisten>;
   onSubagentModel(cb: (e: SubagentModel) => void): Promise<Unlisten>;
   onSubagentStop(cb: (e: SubagentStop) => void): Promise<Unlisten>;
+  onUsageUpdate(cb: (e: UsageUpdate) => void): Promise<Unlisten>;
   onPtyOutput(cb: (e: PtyOutput) => void): Promise<Unlisten>;
   onPtyExit(cb: (e: PtyExit) => void): Promise<Unlisten>;
 }
@@ -58,6 +59,14 @@ function createMock(): Api {
   return {
     getSession: async () => ({ dir: "/mock", model: null }),
     startMain: async () => {
+      let n = 0;
+      const tickUsage = () => {
+        const wob = Math.round(Math.sin(n++ / 2) * 3);
+        const now = Math.floor(Date.now() / 1000);
+        emit<UsageUpdate>("usage", { provider: "claude", session_pct: 34 + wob + (n % 10), week_pct: 61 + wob, session_resets_at: now + 2 * 3600 + 15 * 60, week_resets_at: now + 3 * 86400 + 4 * 3600 });
+      };
+      setTimeout(tickUsage, 500);
+      setInterval(tickUsage, 5000);
       setTimeout(() => {
         out("\x1b[1;36mClaude Code (mock)\x1b[0m\r\n\x1b[32m>\x1b[0m Crie a tela de login\r\n");
         out("\x1b[33mVou delegar o trabalho a subagentes...\x1b[0m\r\n");
@@ -71,6 +80,7 @@ function createMock(): Api {
     onSubagentLog: on<SubagentLog>("log"),
     onSubagentModel: on<SubagentModel>("model"),
     onSubagentStop: on<SubagentStop>("stop"),
+    onUsageUpdate: on<UsageUpdate>("usage"),
     onPtyOutput: on<PtyOutput>("pty"),
     onPtyExit: on<PtyExit>("exit"),
   };
