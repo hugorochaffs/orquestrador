@@ -15,6 +15,8 @@ use types::SessionConfig;
 /// Sobe a GUI Tauri com a sessão já montada pelo CLI.
 pub fn run(session: SessionConfig) {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(session)
         .manage(Arc::new(pty::PtyManager::default()))
         .manage(session::Sessions::default())

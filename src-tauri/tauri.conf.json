@@ -33,6 +33,15 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Interface com abas e orquestração de subagentes para o Claude Code",
-    "longDescription": "Orchestra roda o Claude Code num terminal real com abas e mostra cada subagente numa árvore ao vivo."
+    "longDescription": "Orchestra roda o Claude Code num terminal real com abas e mostra cada subagente numa árvore ao vivo.",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM3MDY0RTE5QkVCRTM4MzYKUldRMk9MNitHVTRHTi9BdGUvNTRpdUdHWFZvcVk5dEpseE5rSVc1TkNlblYyWVBMcXdJZTBYT24K",
+      "endpoints": [
+        "https://github.com/hugorochaffs/orquestrador/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

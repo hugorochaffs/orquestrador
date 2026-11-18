@@ -96,6 +96,12 @@ Ao criar uma tag `v*`, o workflow [`release.yml`](.github/workflows/release.yml)
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+### Atualização automática
+
+Ao abrir, o app checa a última Release. Se houver versão nova, aparece uma barra fina no topo com **Atualizar** (baixa, instala e reinicia) e **Ignorar** (não avisa mais daquela versão). Funciona no Windows e no AppImage do Linux; instalações via `.deb` precisam baixar o novo `.deb` manualmente.
+
+O workflow assina os pacotes com a chave de atualização. Configure uma vez no repositório os secrets `TAURI_SIGNING_PRIVATE_KEY` (conteúdo da chave gerada com `npx tauri signer generate`) e `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; a chave pública fica em `src-tauri/tauri.conf.json`.
+
 ## Arquitetura
 
 - **Backend (Rust/Tauri, `src-tauri/src`):** `pty.rs` (terminal real via `portable-pty`), `session.rs` (sobe o `claude` com hooks), `subagents.rs` (lê eventos e transcripts), `usage.rs` (cota), `config.rs`, `tools.rs` (argv e prompt do orquestrador).

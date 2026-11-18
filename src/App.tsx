@@ -4,6 +4,7 @@ import TabView from "./TabView";
 import TabBar, { type TabInfo } from "./TabBar";
 import BrowserTab from "./BrowserTab";
 import UsageBar from "./UsageBar";
+import UpdateBar from "./UpdateBar";
 import type { BrowserOption, ModelOption, UsageUpdate } from "./types";
 
 interface Tab { id: string; title: string; kind: "session" | "browser"; originId?: string }
@@ -77,6 +78,7 @@ export default function App() {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <UpdateBar />
       <UsageBar usage={usage} />
       <TabBar tabs={infos} activeId={active.id} onSelect={setActiveId} onClose={closeTab} onNew={addTab}
         reserveRight={Object.keys(usage).length ? 330 : 0} />
