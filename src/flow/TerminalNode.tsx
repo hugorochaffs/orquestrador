@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -14,22 +14,15 @@ const COLORS: Record<TaskStatus, string> = {
 };
 
 export default function TerminalNode({ id, data }: NodeProps) {
-  const { title, status, ptyId } = data as { title: string; status: TaskStatus; ptyId: string | null };
+  const { title, status, ptyId, compact, onToggle, reason } = data as {
+    title: string; status: TaskStatus; ptyId: string | null; compact: boolean; onToggle: (id: string) => void; reason?: string;
+  };
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const pty = useRef<string | null>(null);
   pty.current = ptyId;
-  const [compact, setCompact] = useState(false);
-  const [userToggled, setUserToggled] = useState(false);
-
   useEffect(() => {
-    if (status !== "done" || userToggled) return;
-    const t = setTimeout(() => setCompact(true), 3000);
-    return () => clearTimeout(t);
-  }, [status, userToggled]);
-
-  useEffect(() => {
-    const t = new Terminal({ fontSize: 12, convertEol: true, theme: { background: "#0b0d11" } });
+    const t = new Terminal({ fontSize: 14, cursorBlink: true, fontFamily: "ui-monospace, Menlo, Consolas, monospace", convertEol: true, theme: { background: "#0b0d11" } });
     const f = new FitAddon();
     t.loadAddon(f);
     t.open(host.current!);
@@ -49,12 +42,10 @@ export default function TerminalNode({ id, data }: NodeProps) {
     if (ptyId && term.current) api.resizePty(ptyId, term.current.cols, term.current.rows);
   }, [ptyId]);
 
-  const toggle = () => { setUserToggled(true); setCompact((c) => !c); };
-
   return (
     <div className={`tnode ${status} ${compact ? "compact" : ""}`}>
       <Handle type="target" position={Position.Top} />
-      <div className="head" onClick={status === "done" ? toggle : undefined}>
+      <div className="head" onClick={status === "done" ? () => onToggle(id) : undefined}>
         <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {status === "done" && <CheckCircle2 size={16} color="#22c55e" />}{title}
         </span>
@@ -67,7 +58,8 @@ export default function TerminalNode({ id, data }: NodeProps) {
           <button onClick={() => api.resolveConflict(id, "manual_done")}>Já resolvi</button>
         </div>
       )}
-      <div className="term nodrag nowheel" ref={host} />
+      {status === "failed" && <div className="reason">{reason || "Tarefa falhou"}</div>}
+      <div className="term nodrag nowheel" ref={host} onMouseDown={() => term.current?.focus()} />
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
