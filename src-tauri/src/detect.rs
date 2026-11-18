@@ -1,23 +1,6 @@
-//! Detecção de ferramentas no PATH via `which`.
-#[derive(Debug, Clone)]
-pub struct DetectedTool {
-    pub id: String,
-    pub path: std::path::PathBuf,
-}
+//! Detecção do `claude` no PATH.
+use std::path::PathBuf;
 
-pub fn detect_tools() -> Vec<DetectedTool> {
-    crate::tools::known_tools()
-        .iter()
-        .filter_map(|id| which::which(id).ok().map(|path| DetectedTool { id: id.to_string(), path }))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn only_known_ids() {
-        for t in super::detect_tools() {
-            assert!(crate::tools::known_tools().contains(&t.id.as_str()));
-        }
-    }
+pub fn find_claude() -> Result<PathBuf, String> {
+    which::which("claude").map_err(|_| "`claude` não encontrado no PATH; instale o Claude Code".to_string())
 }
