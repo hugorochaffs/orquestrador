@@ -15,6 +15,8 @@ pub enum RepoState {
     Clean,
     Dirty,
     NotRepo,
+    /// repo sem nenhum commit (HEAD não nascido)
+    NoCommits,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Args, String> {
@@ -53,6 +55,9 @@ pub fn repo_state(dir: &Path) -> Result<RepoState, String> {
     if !r.status.success() {
         return Ok(RepoState::NotRepo);
     }
+    if !git(dir, &["rev-parse", "--verify", "-q", "HEAD"])?.status.success() {
+        return Ok(RepoState::NoCommits);
+    }
     let s = git(dir, &["status", "--porcelain"])?;
     if !s.status.success() {
         return Err("git status falhou".into());
@@ -60,21 +65,26 @@ pub fn repo_state(dir: &Path) -> Result<RepoState, String> {
     Ok(if s.stdout.is_empty() { RepoState::Clean } else { RepoState::Dirty })
 }
 
-pub fn init_repo(dir: &Path) -> Result<(), String> {
-    let steps: [&[&str]; 2] = [
-        &["init"],
-        &[
-            "-c", "user.name=Orchestra", "-c", "user.email=orchestra@local",
-            "commit", "--allow-empty", "-m", "commit inicial",
-        ],
-    ];
-    for a in steps {
-        let o = git(dir, a)?;
-        if !o.status.success() {
-            return Err(format!("git falhou: {}", String::from_utf8_lossy(&o.stderr)));
-        }
+fn run_git(dir: &Path, args: &[&str]) -> Result<(), String> {
+    let o = git(dir, args)?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        Err(format!("git falhou: {}", String::from_utf8_lossy(&o.stderr)))
     }
-    Ok(())
+}
+
+pub fn initial_commit(dir: &Path) -> Result<(), String> {
+    run_git(
+        dir,
+        &["-c", "user.name=Orchestra", "-c", "user.email=orchestra@local",
+          "commit", "--allow-empty", "-m", "commit inicial"],
+    )
+}
+
+pub fn init_repo(dir: &Path) -> Result<(), String> {
+    run_git(dir, &["init"])?;
+    initial_commit(dir)
 }
 
 fn ui<T>(r: Result<T, dialoguer::Error>) -> Result<T, String> {
@@ -97,6 +107,19 @@ pub fn parse_and_wizard(args: Vec<String>) -> Result<SessionConfig, String> {
                 return Err("abortado: diretório não é repo git".into());
             }
             init_repo(&a.dir)?;
+        }
+        RepoState::NoCommits => {
+            let ok = ui(Confirm::new()
+                .with_prompt("O repositório não tem commits. Criar um commit inicial vazio?")
+                .default(true)
+                .interact())?;
+            if !ok {
+                return Err("abortado: o repositório precisa de ao menos um commit".into());
+            }
+            initial_commit(&a.dir)?;
+            if repo_state(&a.dir)? == RepoState::Dirty {
+                return Err("working tree sujo: faça commit ou stash antes de iniciar".into());
+            }
         }
     }
 
@@ -153,7 +176,9 @@ mod tests {
     fn repo_states() {
         let d = tmp("repo");
         assert_eq!(repo_state(&d).unwrap(), RepoState::NotRepo);
-        init_repo(&d).unwrap();
+        run_git(&d, &["init"]).unwrap();
+        assert_eq!(repo_state(&d).unwrap(), RepoState::NoCommits);
+        initial_commit(&d).unwrap();
         assert_eq!(repo_state(&d).unwrap(), RepoState::Clean);
         std::fs::write(d.join("a.txt"), "x").unwrap();
         assert_eq!(repo_state(&d).unwrap(), RepoState::Dirty);
