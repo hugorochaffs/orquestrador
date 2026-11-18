@@ -1,5 +1,5 @@
 //! Observa o arquivo de eventos dos hooks e os transcripts dos subagentes.
-use crate::types::{SubagentLog, SubagentStart, SubagentStop};
+use crate::types::{SubagentLog, SubagentModel, SubagentStart, SubagentStop};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -14,6 +14,7 @@ pub enum Event {
     Start(String, String, Option<String>, Option<String>),
     Log(String, String, String),
     Stop(String, Option<String>),
+    Model(String, String),
 }
 
 /// Leitor incremental de linhas completas de um arquivo.
@@ -56,6 +57,7 @@ struct Active {
     path: Option<PathBuf>,
     base: Option<PathBuf>, // diretório subagents
     tail: Tail,
+    model_sent: bool,
 }
 
 struct Pending {
@@ -153,6 +155,19 @@ pub fn parse_transcript_line(line: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Modelo (`message.model`) de uma linha assistant do transcript; ignora vazio e sintético.
+pub fn model_of_line(line: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "assistant" {
+        return None;
+    }
+    let m = v.get("message")?.get("model")?.as_str()?.trim();
+    if m.is_empty() || (m.starts_with('<') && m.ends_with('>')) {
+        return None;
+    }
+    Some(m.to_string())
+}
+
 fn find_transcript(dir: &Path, agent_id: &str) -> Option<PathBuf> {
     let direct = dir.join(format!("agent-{agent_id}.jsonl"));
     if direct.exists() {
@@ -213,7 +228,7 @@ impl<F: FnMut(Event)> Watcher<F> {
                 let base = str_of(&v, "transcript_path").map(|t| {
                     PathBuf::from(t.strip_suffix(".jsonl").unwrap_or(t)).join("subagents")
                 });
-                self.active.insert(id.clone(), Active { path: None, base, tail: Tail::default() });
+                self.active.insert(id.clone(), Active { path: None, base, tail: Tail::default(), model_sent: false });
                 (self.emit)(Event::Start(id, ty, p.as_ref().and_then(|p| p.description.clone()), p.and_then(|p| p.prompt)));
             }
             "SubagentStop" => {
@@ -238,6 +253,12 @@ impl<F: FnMut(Event)> Watcher<F> {
         }
         let Some(p) = a.path.clone() else { return };
         for line in a.tail.read_lines(&p) {
+            if !a.model_sent {
+                if let Some(m) = model_of_line(&line) {
+                    a.model_sent = true;
+                    (self.emit)(Event::Model(id.to_string(), m));
+                }
+            }
             for (k, t) in parse_transcript_line(&line) {
                 (self.emit)(Event::Log(id.to_string(), k, t));
             }
@@ -265,6 +286,9 @@ pub fn spawn_watcher(app: AppHandle, events_file: PathBuf) {
             }
             Event::Log(agent_id, kind, text) => {
                 let _ = app.emit("subagent-log", SubagentLog { agent_id, kind, text });
+            }
+            Event::Model(agent_id, model) => {
+                let _ = app.emit("subagent-model", SubagentModel { agent_id, model });
             }
             Event::Stop(agent_id, last_message) => {
                 let _ = app.emit("subagent-stop", SubagentStop { agent_id, last_message });
@@ -301,6 +325,15 @@ mod tests {
     }
 
     #[test]
+    fn model_line() {
+        assert_eq!(model_of_line(r#"{"type":"assistant","message":{"model":"claude-haiku-4-5-x"}}"#), Some("claude-haiku-4-5-x".into()));
+        assert_eq!(model_of_line(r#"{"type":"assistant","message":{"model":"<synthetic>"}}"#), None);
+        assert_eq!(model_of_line(r#"{"type":"assistant","message":{"model":""}}"#), None);
+        assert_eq!(model_of_line(r#"{"type":"user","message":{"model":"x"}}"#), None);
+        assert_eq!(model_of_line("lixo"), None);
+    }
+
+    #[test]
     fn correlation_and_incremental() {
         let dir = std::env::temp_dir().join(format!("orch-sub-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -321,6 +354,9 @@ mod tests {
             w.tick();
             writeln!(t).unwrap();
             w.tick();
+            writeln!(t, r#"{{"type":"assistant","message":{{"model":"claude-haiku-4-5","content":[{{"type":"text","text":"ok"}}]}}}}"#).unwrap();
+            writeln!(t, r#"{{"type":"assistant","message":{{"model":"claude-opus-4","content":[{{"type":"text","text":"dois"}}]}}}}"#).unwrap();
+            w.tick();
             write!(f, r#"{{"hook_event_name":"SubagentStop","agent_id":"a1","last_assistant_message":"fim""#).unwrap(); // parcial
             w.tick();
             writeln!(f, "}}").unwrap();
@@ -328,8 +364,11 @@ mod tests {
         }
         assert_eq!(events[0], Event::Start("a1".into(), "Explore".into(), Some("d2".into()), Some("p2".into())));
         assert_eq!(events[1], Event::Log("a1".into(), "user".into(), "tarefa".into()));
-        assert_eq!(events[2], Event::Stop("a1".into(), Some("fim".into())));
-        assert_eq!(events.len(), 3);
+        assert_eq!(events[2], Event::Model("a1".into(), "claude-haiku-4-5".into()));
+        assert_eq!(events[3], Event::Log("a1".into(), "text".into(), "ok".into()));
+        assert_eq!(events[4], Event::Log("a1".into(), "text".into(), "dois".into()));
+        assert_eq!(events[5], Event::Stop("a1".into(), Some("fim".into())));
+        assert_eq!(events.len(), 6);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
