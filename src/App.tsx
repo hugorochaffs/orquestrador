@@ -1,137 +1,144 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlow, Background, type ReactFlowInstance } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import { ReactFlow, ReactFlowProvider, useReactFlow, type Edge, type Node } from "@xyflow/react";
 import { api } from "./api";
-import TerminalNode from "./flow/TerminalNode";
-import { layoutPlan, type NodeInfo } from "./flow/layout";
-import { decode, pushOutput } from "./flow/store";
-import type { Plan, TaskStatus } from "./types";
+import MainTerminal, { b64 } from "./MainTerminal";
+import RootNode from "./flow/RootNode";
+import SubagentNode, { type SubagentData } from "./flow/SubagentNode";
+import { computeLayout } from "./flow/layout";
+import type { SubagentLog } from "./types";
 
-const nodeTypes = { terminal: TerminalNode };
-const hhmmss = () => new Date().toLocaleTimeString("pt-BR");
-const LABEL: Record<TaskStatus, string> = {
-  pending: "pendente", running: "iniciou", merging: "entrou em merging", resolving: "resolvendo conflito",
-  done: "concluída", failed: "falhou", needs_user: "precisa de você",
-};
+interface Agent {
+  id: string; agentType: string; description: string | null;
+  status: "running" | "done"; summary: string | null; logs: SubagentLog[];
+  expanded: boolean; // usuário reabriu um nó recolhido
+  doneAt: number | null;
+}
+const nodeTypes = { root: RootNode, subagent: SubagentNode };
+const COLLAPSE_MS = 3000;
 
-export default function App() {
-  const [goal, setGoal] = useState("");
-  const [plan, setPlan] = useState<Plan | null>(null);
-  const [info, setInfo] = useState<Record<string, NodeInfo>>({});
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [log, setLog] = useState<{ t: string; m: string }[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [topPct, setTopPct] = useState(28);
-  const [area, setArea] = useState({ w: 1200, h: 600 });
-  const areaRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const logRef = useRef<HTMLDivElement>(null);
-  const rf = useRef<ReactFlowInstance | null>(null);
-  const planRef = useRef<Plan | null>(null);
-  const userOpen = useRef<Set<string>>(new Set());
-  const addLog = useCallback((m: string) => setLog((l) => [...l, { t: hhmmss(), m }]), []);
-  const title = (id: string) => planRef.current?.tasks.find((t) => t.id === id)?.title ?? id;
-
-  const onToggle = useCallback((id: string) => {
-    userOpen.current.add(id);
-    setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  }, []);
+function Tree({ agents, onToggle }: { agents: Agent[]; onToggle: (id: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 800, h: 400 });
+  const [tick, setTick] = useState(0);
+  const rf = useReactFlow();
 
   useEffect(() => {
-    let alive = true;
-    const un: Array<() => void> = [];
-    (async () => {
-      const subs = await Promise.all([
-        api.onPlanReady((p) => {
-          planRef.current = p; setPlan(p); setLoading(false);
-          setInfo(Object.fromEntries(p.tasks.map((t) => [t.id, { status: "pending" as TaskStatus, ptyId: null }])));
-          addLog(`Plano gerado: ${p.tasks.length} tarefas`);
-        }),
-        api.onTaskStatus((e) => {
-          setInfo((m) => ({ ...m, [e.task_id]: { ...m[e.task_id], status: e.status, ptyId: e.pty_id ?? m[e.task_id]?.ptyId ?? null } }));
-          addLog(`Tarefa "${title(e.task_id)}" ${LABEL[e.status]}`);
-          if (e.status === "done") {
-            setTimeout(() => {
-              if (!userOpen.current.has(e.task_id)) setCollapsed((s) => new Set(s).add(e.task_id));
-            }, 3000);
-          } else {
-            setCollapsed((s) => { if (!s.has(e.task_id)) return s; const n = new Set(s); n.delete(e.task_id); return n; });
-          }
-        }),
-        api.onPtyOutput((e) => pushOutput(e.task_id, decode(e.data))),
-        api.onPtyExit((e) => {
-          addLog(`Terminal da tarefa "${title(e.task_id)}" encerrou (código ${e.code})`);
-          if (e.code !== 0) setInfo((m) => m[e.task_id] ? { ...m, [e.task_id]: { ...m[e.task_id], reason: `Processo encerrou com código ${e.code}` } } : m);
-        }),
-      ]);
-      if (!alive) { subs.forEach((u) => u()); return; }
-      un.push(...subs);
-      api.getSession().then((s) => setGoal(s.goal)).catch(() => {});
-      api.startRun().catch((e) => { setError(String(e)); setLoading(false); addLog(`Erro do planner: ${e}`); });
-    })();
-    return () => { alive = false; un.forEach((u) => u()); };
-  }, [addLog]);
-
-  useEffect(() => {
-    const el = areaRef.current; if (!el) return;
-    const ro = new ResizeObserver(() => setArea({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
+    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    ro.observe(box.current!);
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [log]);
-
-  const { nodes, edges } = useMemo(
-    () => plan ? layoutPlan(plan, area, collapsed, info, onToggle) : { nodes: [], edges: [] },
-    [plan, area, collapsed, info, onToggle],
-  );
-  const geom = nodes.map((n) => `${n.id}:${n.position.x | 0},${n.position.y | 0},${n.style?.width},${n.style?.height}`).join("|");
+  // Reavalia o recolhimento automático 3s após concluir.
   useEffect(() => {
-    const t = setTimeout(() => rf.current?.fitView({ padding: 0.02, duration: 200, minZoom: 0.1 }), 30);
+    const pend = agents.filter((a) => a.doneAt && !a.expanded).map((a) => a.doneAt! + COLLAPSE_MS - Date.now()).filter((ms) => ms > 0);
+    if (!pend.length) return;
+    const t = setTimeout(() => setTick((n) => n + 1), Math.min(...pend) + 20);
     return () => clearTimeout(t);
-  }, [geom]);
+  }, [agents, tick]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    Object.values(info).forEach((i) => { c[i.status] = (c[i.status] ?? 0) + 1; });
-    return c;
-  }, [info]);
-  const total = plan?.tasks.length ?? 0;
+  const collapsed = agents.map((a) => a.status === "done" && !a.expanded && Date.now() - (a.doneAt ?? 0) >= COLLAPSE_MS);
+  const ckey = collapsed.join(",");
+  const { nodes, edges } = useMemo(() => {
+    const L = computeLayout(size.w, size.h, collapsed);
+    const running = agents.filter((a) => a.status === "running").length;
+    const ns: Node[] = [{
+      id: "root", type: "root", position: { x: L.root.x, y: L.root.y }, width: L.root.w, height: L.root.h,
+      data: { running, done: agents.length - running }, draggable: false,
+    }];
+    const es: Edge[] = [];
+    agents.forEach((a, i) => {
+      const b = L.children[i];
+      const data: SubagentData = {
+        agentType: a.agentType, description: a.description, status: a.status, summary: a.summary,
+        logs: a.logs, collapsed: collapsed[i], onToggle,
+      };
+      ns.push({ id: a.id, type: "subagent", position: { x: b.x, y: b.y }, width: b.w, height: b.h, data, draggable: false });
+      es.push({ id: `e-${a.id}`, source: "root", target: a.id, animated: a.status === "running", style: { stroke: a.status === "running" ? "#3b82f6" : "#374151" } });
+    });
+    return { nodes: ns, edges: es };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agents, size, ckey, onToggle]);
 
-  const startDrag = (ev: React.MouseEvent) => {
+  useEffect(() => { rf.fitView({ padding: 0.02, duration: 150 }); }, [nodes.length, size, ckey, rf]);
+
+  return (
+    <div ref={box} style={{ width: "100%", height: "100%" }}>
+      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={1.5}
+        nodesDraggable={false} nodesConnectable={false} proOptions={{ hideAttribution: true }}
+        style={{ background: "#0b0d12" }} />
+    </div>
+  );
+}
+
+export default function App() {
+  const [ptyId, setPtyId] = useState<string | null>(null);
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [split, setSplit] = useState(0.45);
+  const [resizeKey, setResizeKey] = useState(0);
+  const pending = useRef<Uint8Array[]>([]);
+  const writer = useRef<((d: Uint8Array) => void) | null>(null);
+  const idRef = useRef<string | null>(null);
+  const early = useRef<{ pty_id: string; d: Uint8Array }[]>([]);
+  const root = useRef<HTMLDivElement>(null);
+  const register = useCallback((w: ((d: Uint8Array) => void) | null) => { writer.current = w; }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const un: (() => void)[] = [];
+    const deliver = (d: Uint8Array) => (writer.current ? writer.current(d) : pending.current.push(d));
+    const add = (p: Promise<() => void>) => p.then((u) => (alive ? un.push(u) : u()));
+    (async () => {
+      // Todos os listeners ANTES do startMain.
+      await Promise.all([
+        add(api.onPtyOutput((e) => {
+          const d = b64(e.data);
+          if (idRef.current === null) early.current.push({ pty_id: e.pty_id, d });
+          else if (e.pty_id === idRef.current) deliver(d);
+        })),
+        add(api.onPtyExit((e) => { if (e.pty_id === idRef.current) setExitCode(e.code); })),
+        add(api.onSubagentStart((e) => setAgents((s) => s.some((a) => a.id === e.agent_id) ? s : [...s, {
+          id: e.agent_id, agentType: e.agent_type, description: e.description, status: "running",
+          summary: null, logs: [], expanded: false, doneAt: null,
+        }]))),
+        add(api.onSubagentLog((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, logs: [...a.logs, e] } : a)))),
+        add(api.onSubagentStop((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, status: "done", summary: e.last_message, doneAt: Date.now() } : a)))),
+      ]);
+      if (!alive) return;
+      const id = await api.startMain();
+      if (!alive) return;
+      idRef.current = id;
+      early.current.filter((x) => x.pty_id === id).forEach((x) => deliver(x.d));
+      early.current = [];
+      setPtyId(id);
+    })();
+    return () => { alive = false; un.forEach((u) => u()); };
+  }, []);
+
+  const toggle = useCallback((id: string) => setAgents((s) => s.map((a) => a.id === id ? { ...a, expanded: !a.expanded } : a)), []);
+
+  const drag = (ev: React.PointerEvent) => {
     ev.preventDefault();
-    const move = (e: MouseEvent) => {
-      const r = rootRef.current!.getBoundingClientRect();
-      setTopPct(Math.min(60, Math.max(12, ((e.clientY - r.top) / r.height) * 100)));
-    };
-    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
-    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    const rect = root.current!.getBoundingClientRect();
+    const move = (m: PointerEvent) => setSplit(Math.min(0.75, Math.max(0.25, (m.clientY - rect.top) / rect.height)));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); setResizeKey((k) => k + 1); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
 
   return (
-    <div ref={rootRef} style={{ width: "100vw", height: "100vh", background: "#0b0d11", display: "flex", flexDirection: "column", color: "#e5e7eb", fontFamily: "system-ui" }}>
-      <div style={{ height: `${topPct}%`, flex: "none", display: "flex", flexDirection: "column", padding: "8px 14px", gap: 4, minHeight: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 14 }}>
-          <b>Orquestrador{goal ? `: ${goal}` : ""}</b>
-          <span style={{ whiteSpace: "nowrap" }}>
-            {counts.done ?? 0}/{total} concluídas
-            {(["running", "merging", "resolving", "needs_user", "failed", "pending"] as TaskStatus[]).filter((s) => counts[s]).map((s) => ` · ${counts[s]} ${s}`)}
-          </span>
-        </div>
-        {plan && <div style={{ opacity: 0.75, fontSize: 13 }}>{plan.plan_summary}</div>}
-        {loading && !error && <div style={{ color: "#60a5fa", fontSize: 13 }}>Planejando…</div>}
-        {error && <div style={{ color: "#f87171", fontSize: 13 }}>Erro do planner: {error}</div>}
-        <div ref={logRef} style={{ flex: 1, minHeight: 0, overflow: "auto", background: "#05070a", border: "1px solid #1f2937", borderRadius: 6, padding: "6px 8px", fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontSize: 12 }}>
-          {log.map((l, i) => <div key={i}><span style={{ opacity: 0.5 }}>{l.t}</span> {l.m}</div>)}
+    <div ref={root} style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ height: `${split * 100}%`, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {exitCode !== null && (
+          <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px" }}>sessão principal encerrada (código {exitCode})</div>
+        )}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <MainTerminal ptyId={ptyId} pending={pending.current} register={register} resizeKey={resizeKey} />
         </div>
       </div>
-      <div onMouseDown={startDrag} style={{ height: 6, cursor: "row-resize", background: "#1f2937", flex: "none" }} />
-      <div ref={areaRef} style={{ flex: 1, minHeight: 0 }}>
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView minZoom={0.1} nodesDraggable={false}
-          onInit={(i) => { rf.current = i; }} proOptions={{ hideAttribution: true }}>
-          <Background />
-        </ReactFlow>
+      <div onPointerDown={drag} style={{ height: 6, cursor: "row-resize", background: "#1f2430", flex: "none" }} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ReactFlowProvider><Tree agents={agents} onToggle={toggle} /></ReactFlowProvider>
       </div>
     </div>
   );

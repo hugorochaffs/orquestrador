@@ -1,71 +1,40 @@
-import type { Edge, Node } from "@xyflow/react";
-import type { Plan, TaskStatus } from "../types";
+export interface Box { x: number; y: number; w: number; h: number }
 
-export const MIN_W = 420;
-export const MIN_H = 260;
-export const CW = 240; // card recolhido
-export const CH = 44;
 const GAP = 16;
+const ROOT_H = 64;
+const MIN_W = 360;
+const MIN_H = 220;
+const COMPACT_W = 260;
+const COMPACT_H = 56;
+const PER_ROW = 4;
 
-export interface NodeInfo { status: TaskStatus; ptyId: string | null; reason?: string }
-
-export function layoutPlan(
-  plan: Plan,
-  area: { w: number; h: number },
-  collapsed: Set<string>,
-  info: Record<string, NodeInfo>,
-  onToggle: (id: string) => void,
-): { nodes: Node[]; edges: Edge[] } {
-  const byId = new Map(plan.tasks.map((t) => [t.id, t]));
-  const level = new Map<string, number>();
-  const lv = (id: string, seen: Set<string> = new Set()): number => {
-    if (level.has(id)) return level.get(id)!;
-    if (seen.has(id)) return 0;
-    seen.add(id);
-    const deps = (byId.get(id)?.depends_on ?? []).filter((d) => byId.has(d));
-    const l = deps.length ? 1 + Math.max(...deps.map((d) => lv(d, seen))) : 0;
-    level.set(id, l);
-    return l;
-  };
-  const levels: string[][] = [];
-  plan.tasks.forEach((t) => { (levels[lv(t.id)] ??= []).push(t.id); });
-  const rows = levels.filter(Boolean);
-
-  const isC = (id: string) => collapsed.has(id);
-  const flex = rows.map((r) => r.some((id) => !isC(id)));
-  const fixedH = rows.reduce((a, _, i) => a + (flex[i] ? 0 : CH), 0);
-  const nFlex = flex.filter(Boolean).length;
-  const totalGap = GAP * (rows.length + 1);
-  const rowH = nFlex ? Math.max(MIN_H, (area.h - fixedH - totalGap) / nFlex) : 0;
-
-  const nodes: Node[] = [];
-  let y = GAP;
-  rows.forEach((r, i) => {
-    const h = flex[i] ? rowH : CH;
-    const nc = r.filter(isC).length;
-    const ne = r.length - nc;
-    const w = ne ? Math.max(MIN_W, (area.w - GAP * (r.length + 1) - nc * CW) / ne) : 0;
-    const total = r.reduce((a, id) => a + (isC(id) ? CW : w), 0) + GAP * (r.length - 1);
-    let x = Math.max(GAP, (area.w - total) / 2);
-    r.forEach((id) => {
-      const c = isC(id);
-      const nw = c ? CW : w;
-      const nh = c ? CH : h;
-      const inf = info[id] ?? { status: "pending" as TaskStatus, ptyId: null };
-      nodes.push({
-        id, type: "terminal", position: { x, y: c && flex[i] ? y + (h - CH) / 2 : y },
-        style: { width: nw, height: nh },
-        data: { title: byId.get(id)!.title, ...inf, compact: c, onToggle },
-      });
-      x += nw + GAP;
-    });
+/** Posições da raiz (centrada no topo) e dos filhos em linhas abaixo dela. */
+export function computeLayout(width: number, height: number, collapsed: boolean[]): { root: Box; children: Box[] } {
+  const rootW = Math.min(420, Math.max(260, width - 2 * GAP));
+  const root = { x: (width - rootW) / 2, y: GAP, w: rootW, h: ROOT_H };
+  const n = collapsed.length;
+  const perRow = Math.max(1, Math.min(PER_ROW, Math.floor((width - GAP) / (MIN_W + GAP))));
+  const rows: number[][] = [];
+  for (let i = 0; i < n; i += perRow) rows.push(Array.from({ length: Math.min(perRow, n - i) }, (_, k) => i + k));
+  const top = root.y + ROOT_H + 40;
+  const rowCollapsed = rows.map((r) => r.every((i) => collapsed[i]));
+  const expandedRows = rowCollapsed.filter((c) => !c).length;
+  const compactRows = rows.length - expandedRows;
+  const avail = height - top - GAP - compactRows * (COMPACT_H + GAP) - Math.max(0, expandedRows - 1) * GAP;
+  const rowH = expandedRows ? Math.max(MIN_H, avail / expandedRows) : 0;
+  const children: Box[] = new Array(n);
+  let y = top;
+  rows.forEach((r, ri) => {
+    const h = rowCollapsed[ri] ? COMPACT_H : rowH;
+    const cols = r.length;
+    const cellW = Math.max(MIN_W, (width - GAP * (cols + 1)) / cols);
+    const totalW = cols * cellW + (cols - 1) * GAP;
+    let x = Math.max(GAP, (width - totalW) / 2);
+    for (const i of r) {
+      children[i] = collapsed[i] ? { x, y, w: COMPACT_W, h: COMPACT_H } : { x, y, w: cellW, h };
+      x += cellW + GAP;
+    }
     y += h + GAP;
   });
-  const edges: Edge[] = plan.tasks.flatMap((t) =>
-    t.depends_on.filter((d) => byId.has(d)).map((d) => ({
-      id: `${d}->${t.id}`, source: d, target: t.id, animated: true,
-      style: { stroke: "#94a3b8", strokeWidth: 2 }, markerEnd: { type: "arrowclosed" as const, color: "#94a3b8" },
-    })),
-  );
-  return { nodes, edges };
+  return { root, children };
 }
