@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
+import type { ModelOption, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
 
 export const getSession = () => invoke<SessionConfig>("get_session");
-/** Sobe o claude principal; devolve o pty_id. Registre os listeners ANTES. */
-export const startMain = () => invoke<string>("start_main");
+/** Sobe o claude principal com o modelo escolhido na tela inicial (null = padrão do claude); devolve o pty_id. Registre os listeners ANTES. */
+export const listModels = () => invoke<ModelOption[]>("list_models");
+export const startMain = (model: string | null) => invoke<string>("start_main", { model });
 export const writePty = (id: string, data: string) => invoke<void>("write_pty", { id, data });
 export const resizePty = (id: string, cols: number, rows: number) => invoke<void>("resize_pty", { id, cols, rows });
 
