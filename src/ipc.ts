@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop } from "./types";
+import type { PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop, UsageUpdate } from "./types";
 
 export const getSession = () => invoke<SessionConfig>("get_session");
 /** Sobe o claude principal; devolve o pty_id. Registre os listeners ANTES. */
