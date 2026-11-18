@@ -5,6 +5,7 @@ import MainTerminal, { b64 } from "./MainTerminal";
 import RootNode from "./flow/RootNode";
 import SubagentNode, { type SubagentData } from "./flow/SubagentNode";
 import { computeLayout } from "./flow/layout";
+import SubagentModal from "./flow/SubagentModal";
 import UsageBar from "./UsageBar";
 import SetupScreen from "./SetupScreen";
 import type { ModelOption, SubagentLog, UsageUpdate } from "./types";
@@ -20,7 +21,7 @@ const nodeTypes = { root: RootNode, subagent: SubagentNode };
 const COLLAPSE_MS = 3000;
 const HIDE_MS = 4000;
 
-function Tree({ agents, onToggle }: { agents: Agent[]; onToggle: (id: string) => void }) {
+function Tree({ agents, onToggle, onOpen }: { agents: Agent[]; onToggle: (id: string) => void; onOpen: (id: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 400 });
   const [tick, setTick] = useState(0);
@@ -54,14 +55,14 @@ function Tree({ agents, onToggle }: { agents: Agent[]; onToggle: (id: string) =>
       const b = L.children[i];
       const data: SubagentData = {
         agentType: a.agentType, description: a.description, status: a.status, summary: a.summary,
-        logs: a.logs, collapsed: collapsed[i], onToggle, model: a.model,
+        logs: a.logs, collapsed: collapsed[i], onToggle, onOpen, model: a.model,
       };
       ns.push({ id: a.id, type: "subagent", position: { x: b.x, y: b.y }, width: b.w, height: b.h, data, draggable: false });
       es.push({ id: `e-${a.id}`, source: "root", target: a.id, animated: a.status === "running", style: { stroke: a.status === "running" ? "#3b82f6" : "#374151" } });
     });
     return { nodes: ns, edges: es };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, size, ckey, onToggle]);
+  }, [agents, size, ckey, onToggle, onOpen]);
 
   useEffect(() => { rf.fitView({ padding: 0.02, duration: 150 }); }, [nodes.length, size, ckey, rf]);
 
@@ -92,6 +93,7 @@ export default function App() {
   const [chosen, setChosen] = useState<ModelOption | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const aliveRef = useRef(true);
   const deliver = useCallback((d: Uint8Array) => (writer.current ? writer.current(d) : pending.current.push(d)), []);
   const register = useCallback((w: ((d: Uint8Array) => void) | null) => { writer.current = w; }, []);
@@ -158,6 +160,11 @@ export default function App() {
 
   const toggle = useCallback((id: string) => setAgents((s) => s.map((a) => a.id === id ? { ...a, expanded: !a.expanded } : a)), []);
 
+  const openAgent = useCallback((id: string) => setOpenId(id), []);
+  const closeModal = useCallback(() => setOpenId(null), []);
+  const modalAgent = openId ? agents.find((a) => a.id === openId) : undefined;
+  useEffect(() => { if (openId && !modalAgent) setOpenId(null); }, [openId, modalAgent]);
+
   const drag = (ev: React.PointerEvent) => {
     ev.preventDefault();
     const rect = root.current!.getBoundingClientRect();
@@ -186,9 +193,10 @@ export default function App() {
       {showTree && (<>
       <div onPointerDown={drag} style={{ height: 6, cursor: "row-resize", background: "#1f2430", flex: "none" }} />
       <div style={{ flex: 1, minHeight: 0 }}>
-        <ReactFlowProvider><Tree agents={agents} onToggle={toggle} /></ReactFlowProvider>
+        <ReactFlowProvider><Tree agents={agents} onToggle={toggle} onOpen={openAgent} /></ReactFlowProvider>
       </div>
       </>)}
+      {modalAgent && <SubagentModal agent={modalAgent} onClose={closeModal} />}
     </div>
   );
 }
