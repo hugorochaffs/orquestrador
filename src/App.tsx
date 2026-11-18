@@ -12,9 +12,11 @@ interface Agent {
   status: "running" | "done"; summary: string | null; logs: SubagentLog[];
   expanded: boolean; // usuário reabriu um nó recolhido
   doneAt: number | null;
+  model: string | null;
 }
 const nodeTypes = { root: RootNode, subagent: SubagentNode };
 const COLLAPSE_MS = 3000;
+const HIDE_MS = 4000;
 
 function Tree({ agents, onToggle }: { agents: Agent[]; onToggle: (id: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
@@ -50,7 +52,7 @@ function Tree({ agents, onToggle }: { agents: Agent[]; onToggle: (id: string) =>
       const b = L.children[i];
       const data: SubagentData = {
         agentType: a.agentType, description: a.description, status: a.status, summary: a.summary,
-        logs: a.logs, collapsed: collapsed[i], onToggle,
+        logs: a.logs, collapsed: collapsed[i], onToggle, model: a.model,
       };
       ns.push({ id: a.id, type: "subagent", position: { x: b.x, y: b.y }, width: b.w, height: b.h, data, draggable: false });
       es.push({ id: `e-${a.id}`, source: "root", target: a.id, animated: a.status === "running", style: { stroke: a.status === "running" ? "#3b82f6" : "#374151" } });
@@ -81,6 +83,7 @@ export default function App() {
   const idRef = useRef<string | null>(null);
   const early = useRef<{ pty_id: string; d: Uint8Array }[]>([]);
   const root = useRef<HTMLDivElement>(null);
+  const models = useRef<Record<string, string>>({});
   const register = useCallback((w: ((d: Uint8Array) => void) | null) => { writer.current = w; }, []);
 
   useEffect(() => {
@@ -99,8 +102,9 @@ export default function App() {
         add(api.onPtyExit((e) => { if (e.pty_id === idRef.current) setExitCode(e.code); })),
         add(api.onSubagentStart((e) => setAgents((s) => s.some((a) => a.id === e.agent_id) ? s : [...s, {
           id: e.agent_id, agentType: e.agent_type, description: e.description, status: "running",
-          summary: null, logs: [], expanded: false, doneAt: null,
+          summary: null, logs: [], expanded: false, doneAt: null, model: models.current[e.agent_id] ?? null,
         }]))),
+        add(api.onSubagentModel((e) => { models.current[e.agent_id] = e.model; setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, model: e.model } : a)); })),
         add(api.onSubagentLog((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, logs: [...a.logs, e] } : a)))),
         add(api.onSubagentStop((e) => setAgents((s) => s.map((a) => a.id === e.agent_id ? { ...a, status: "done", summary: e.last_message, doneAt: Date.now() } : a)))),
       ]);
@@ -115,6 +119,19 @@ export default function App() {
     return () => { alive = false; un.forEach((u) => u()); };
   }, []);
 
+  // Tudo concluído: espera 4s e some com a árvore (o terminal volta a 100%).
+  const allDone = agents.length > 0 && agents.every((a) => a.status === "done");
+  useEffect(() => {
+    if (!allDone) return;
+    const t = setTimeout(() => { models.current = {}; setAgents([]); }, HIDE_MS);
+    return () => clearTimeout(t);
+  }, [allDone, agents]);
+  const showTree = agents.length > 0;
+  useEffect(() => { // refaz o fit ao fim da transição de altura
+    const t = setTimeout(() => setResizeKey((k) => k + 1), 300);
+    return () => clearTimeout(t);
+  }, [showTree]);
+
   const toggle = useCallback((id: string) => setAgents((s) => s.map((a) => a.id === id ? { ...a, expanded: !a.expanded } : a)), []);
 
   const drag = (ev: React.PointerEvent) => {
@@ -128,7 +145,7 @@ export default function App() {
 
   return (
     <div ref={root} style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ height: `${split * 100}%`, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ height: showTree ? `${split * 100}%` : "100%", transition: "height 0.25s ease", minHeight: 0, display: "flex", flexDirection: "column" }}>
         {exitCode !== null && (
           <div style={{ background: "#7f1d1d", color: "#fecaca", fontSize: 13, padding: "4px 12px" }}>sessão principal encerrada (código {exitCode})</div>
         )}
@@ -136,10 +153,12 @@ export default function App() {
           <MainTerminal ptyId={ptyId} pending={pending.current} register={register} resizeKey={resizeKey} />
         </div>
       </div>
+      {showTree && (<>
       <div onPointerDown={drag} style={{ height: 6, cursor: "row-resize", background: "#1f2430", flex: "none" }} />
       <div style={{ flex: 1, minHeight: 0 }}>
         <ReactFlowProvider><Tree agents={agents} onToggle={toggle} /></ReactFlowProvider>
       </div>
+      </>)}
     </div>
   );
 }

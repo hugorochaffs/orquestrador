@@ -10,6 +10,7 @@ export interface SubagentData extends Record<string, unknown> {
   status: "running" | "done";
   summary: string | null;
   logs: SubagentLog[];
+  model: string | null;
   collapsed: boolean;
   onToggle: (id: string) => void;
 }
@@ -39,6 +40,11 @@ function Entry({ e }: { e: SubagentLog }) {
   );
 }
 
+/** "claude-haiku-4-5-20251001" -> "haiku-4-5" */
+export function shortModel(m: string) {
+  return m.replace(/^claude-/, "").replace(/-\d{8}$/, "").replace(/\[.*\]$/, "");
+}
+
 function SubagentNode({ id, data }: NodeProps) {
   const d = data as SubagentData;
   const body = useRef<HTMLDivElement>(null);
@@ -64,6 +70,7 @@ function SubagentNode({ id, data }: NodeProps) {
       <Handle type="target" position={Position.Top} />
       <div className="sa-head" onClick={done ? () => d.onToggle(id) : undefined}>
         <span className="sa-title" title={title}><b>{d.agentType}</b>{d.description ? ` — ${d.description}` : ""}</span>
+        <span className="sa-model" title={d.model ?? "aguardando modelo"} style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: "#1f2430", color: "#9ca3af", opacity: d.model ? 1 : 0.5, whiteSpace: "nowrap", flex: "none" }}>{d.model ? shortModel(d.model) : "modelo…"}</span>
         <span className={`sa-badge ${d.status}`}>
           {done ? <CheckCircle2 size={12} /> : <Loader2 size={12} className="spin" />}
           {done ? "done" : "running"}

@@ -1,6 +1,6 @@
 // Fachada: usa o IPC do Tauri; no navegador (sem Tauri) usa um mock para validar a UI.
 import * as ipc from "./ipc";
-import type { LogKind, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentStart, SubagentStop } from "./types";
+import type { LogKind, PtyExit, PtyOutput, SessionConfig, SubagentLog, SubagentModel, SubagentStart, SubagentStop } from "./types";
 
 type Unlisten = () => void;
 export interface Api {
@@ -10,6 +10,7 @@ export interface Api {
   resizePty(id: string, cols: number, rows: number): Promise<void>;
   onSubagentStart(cb: (e: SubagentStart) => void): Promise<Unlisten>;
   onSubagentLog(cb: (e: SubagentLog) => void): Promise<Unlisten>;
+  onSubagentModel(cb: (e: SubagentModel) => void): Promise<Unlisten>;
   onSubagentStop(cb: (e: SubagentStop) => void): Promise<Unlisten>;
   onPtyOutput(cb: (e: PtyOutput) => void): Promise<Unlisten>;
   onPtyExit(cb: (e: PtyExit) => void): Promise<Unlisten>;
@@ -28,13 +29,14 @@ function createMock(): Api {
   const out = (s: string) => emit<PtyOutput>("pty", { pty_id: PTY, task_id: "", data: btoa(s) });
 
   const agents = [
-    { id: "a1", type: "Explore", desc: "Mapear a estrutura do projeto", at: 3000 },
-    { id: "a2", type: "general-purpose", desc: "Implementar o componente de login", at: 5500 },
-    { id: "a3", type: "code-reviewer", desc: "Revisar as mudanças", at: 9000 },
+    { id: "a1", type: "Explore", desc: "Mapear a estrutura do projeto", at: 3000, model: "claude-haiku-4-5-20251001" },
+    { id: "a2", type: "general-purpose", desc: "Implementar o componente de login", at: 5500, model: "claude-sonnet-5-5" },
+    { id: "a3", type: "code-reviewer", desc: "Revisar as mudanças", at: 9000, model: "claude-opus-5-5" },
   ];
   const run = (a: (typeof agents)[number]) => {
     const log = (kind: LogKind, text: string) => emit<SubagentLog>("log", { agent_id: a.id, kind, text });
     emit<SubagentStart>("start", { agent_id: a.id, agent_type: a.type, description: a.desc, prompt: null });
+    setTimeout(() => emit<SubagentModel>("model", { agent_id: a.id, model: a.model }), 400);
     log("user", `Você é o subagente ${a.type}. Tarefa: ${a.desc}. Seja objetivo e reporte o resultado final.`);
     const steps: [LogKind, string][] = [
       ["text", "Vou começar lendo os arquivos relevantes."],
@@ -67,6 +69,7 @@ function createMock(): Api {
     resizePty: async () => {},
     onSubagentStart: on<SubagentStart>("start"),
     onSubagentLog: on<SubagentLog>("log"),
+    onSubagentModel: on<SubagentModel>("model"),
     onSubagentStop: on<SubagentStop>("stop"),
     onPtyOutput: on<PtyOutput>("pty"),
     onPtyExit: on<PtyExit>("exit"),
