@@ -38,7 +38,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM3MDY0RTE5QkVCRTM4MzYKUldRMk9MNitHVTRHTi9BdGUvNTRpdUdHWFZvcVk5dEpseE5rSVc1TkNlblYyWVBMcXdJZTBYT24K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJEQTkwOTg3NjA2NEU3M0YKUldRLzUyUmdod21wTGV3czdobnI0dTRHNGs2RlRRa0Z3cENPcGlqb0JtemhkLzl0a3JPcitCRlcK",
       "endpoints": [
         "https://github.com/hugorochaffs/orquestrador/releases/latest/download/latest.json"
       ]
